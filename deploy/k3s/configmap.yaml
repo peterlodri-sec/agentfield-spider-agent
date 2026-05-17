@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spider-config
+  labels:
+    app: spider-agent
+data:
+  # --- AgentField ---
+  AGENT_NODE_ID: "spider-agent"
+  AGENTFIELD_SERVER: "http://control-plane.default.svc.cluster.local:8080"
+  AGENT_CALLBACK_URL: "http://spider-agent.default.svc.cluster.local:8005"
+  PORT: "8005"
+
+  # --- HTTP surface ---
+  CRAWLER_PORT: "11700"
+
+  # Agent process talks to the HTTP process via localhost — they share
+  # the pod (sidecar pattern). Override only if you split the pods.
+  SPIDER_HTTP_URL: "http://localhost:11700"
+  SPIDER_TIMEOUT_S: "60"
+
+  # --- Redis ---
+  # Assumes a redis Service in the same namespace. To bundle a redis
+  # sidecar instead, add a third container and set this to
+  # redis://localhost:6379/0.
+  REDIS_URL: "redis://redis.default.svc.cluster.local:6379/0"
+
+  # --- Crawl politeness ---
+  CRAWL_HOST_RPS: "1.0"
+  CRAWL_HOST_BURST: "1"
+  CRAWL_ROBOTS_TTL_S: "3600"
+  CRAWL_ROBOTS_UA: "agentfield-spider/0.1"
+  CRAWL_ROBOTS_DISABLE: "0"
+  CRAWL_CONCURRENCY: "3"
+
+  # --- Browser pool ---
+  BROWSER_MAX_PAGES: "3"
+  BROWSER_IDLE_S: "60"
+  FETCH_TIMEOUT_MS: "30000"
+  FETCH_HEADLESS: "1"
+  FETCH_DISABLE_RES: "1"
+  FETCH_NETWORK_IDLE: "1"
+
+  # --- Feed polling ---
+  FEED_INTERVAL: "3600"
+  POLL_TICK_MIN: "30"
+  POLL_TICK_MAX: "600"
+
+  # --- Tracing (optional) ---
+  LANGSMITH_TRACING: "false"

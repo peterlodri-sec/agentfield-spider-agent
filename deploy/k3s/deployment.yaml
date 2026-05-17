@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spider-agent
+  labels:
+    app: spider-agent
+spec:
+  # v1 is single-replica: one CloakBrowser per pod, dedupe is via
+  # Redis crawler:seen so adding replicas later won't double-crawl,
+  # but the dispatcher BRPOP semantics expect a single leader. Keep
+  # this at 1 until we have a leader-election story.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spider-agent
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: spider-agent
+    spec:
+      restartPolicy: Always
+      containers:
+      # The AgentField surface — small, fast restart, no browser.
+      - name: agent
+        # Override to the image you've built + pushed. See deploy/k3s/README.md.
+        image: ghcr.io/peterlodri-sec/agentfield-spider-agent:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "main.py"]
+        ports:
+        - name: agent
+          containerPort: 8005
+        envFrom:
+        - configMapRef:
+            name: spider-config
+        - secretRef:
+            name: spider-secrets
+            optional: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+      # The HTTP surface — owns the browser pool + Redis tasks.
+      - name: http
+        image: ghcr.io/peterlodri-sec/agentfield-spider-agent:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "spider_server.py"]
+        ports:
+        - name: http
+          containerPort: 11700
+        envFrom:
+        - configMapRef:
+            name: spider-config
+        - secretRef:
+            name: spider-secrets
+            optional: true
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            # Chromium needs headroom — 2 GiB is the v1 default.
+            cpu: "2"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        # ~200 MB Chromium binary auto-fetched on first run; cached
+        # across requests but reset on pod restart. Upgrade to a PVC
+        # if you want cross-restart persistence — see README.md.
+        - name: cloak-cache
+          mountPath: /root/.cloakbrowser
+
+      volumes:
+      - name: cloak-cache
+        emptyDir:
+          sizeLimit: 1Gi

@@ -10,20 +10,20 @@ Web fetch + RSS/Atom feed polling for the agent fleet. CloakBrowser-backed
 
 ## Status
 
-Bootstrap commit. Real fetch lands in PR 1, async + feeds in PR 2,
-AgentField wiring + k3s manifests in PR 3. See
-[the approved plan](../../../../../.claude/plans/sprightly-sauteeing-simon.md)
-or the issue tracker.
+v1 complete. Both surfaces wired, k3s manifests in `deploy/k3s/`. End-to-end
+smoke against a real CloakBrowser still requires `docker compose up` or
+a k3s rollout — see "Local quick start" below.
 
-## Capability (planned)
+## Capability
 
 | Surface | Signature | Returns |
 |---|---|---|
-| AgentField | `fetch(url, sync=True, extract=True)` | `{title, text, links?, ms}` |
-| HTTP | `POST /fetch/sync {url}` | same dict |
+| AgentField | `spider-agent.fetch(url, sync=True)` | `{status, id, url, fetch_url, title, text, ms, ts}` on ok |
+| AgentField | `spider-agent.feed_add(url, interval_s=3600, name=None)` | feed record |
+| HTTP | `POST /fetch/sync {url}` | same dict as `fetch(sync=True)` |
 | HTTP | `POST /fetch {url}` | `{queued: true, url}` (Redis-backed worker) |
 | HTTP | `POST /feeds {url, interval_s?, name?}` | `{id, url, ...}` |
-| HTTP | `GET /feeds`, `DELETE /feeds/{id}`, `POST /feeds/{id}/poll` | feed CRUD + force-poll |
+| HTTP | `GET /feeds` / `GET /feeds/{id}` / `DELETE /feeds/{id}` / `POST /feeds/{id}/poll` | feed CRUD + force-poll |
 | HTTP | `GET /jobs?limit=50` | recent fetch outcomes |
 | HTTP | `GET /health` | snapshot |
 

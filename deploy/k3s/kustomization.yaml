@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Deploy in default namespace by default. Override at apply time:
+#   kubectl apply -k deploy/k3s/ -n <ns>
+# Or set `namespace: <ns>` below.
+
+resources:
+- configmap.yaml
+- deployment.yaml
+- service.yaml
+
+# secret.example.yaml is intentionally NOT in resources — it's a
+# template. Copy to secret.yaml (gitignored), fill in values, apply
+# separately, or add to a per-environment overlay.
+
+commonLabels:
+  app: spider-agent
+  app.kubernetes.io/name: agentfield-spider-agent
+  app.kubernetes.io/part-of: agentfield-fleet
