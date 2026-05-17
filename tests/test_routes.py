@@ -17,13 +17,15 @@ from aiohttp.test_utils import TestClient, TestServer
 from spider.routes import register_routes
 
 
-def _build_test_app(deps: Any) -> web.Application:
+def _build_test_app(deps: Any, redis: Any = None) -> web.Application:
     app = web.Application()
     app["http"] = deps.http
     app["browser"] = deps.pool
     app["robots"] = deps.robots
     app["bucket"] = deps.bucket
     app["deps"] = deps
+    if redis is not None:
+        app["redis"] = redis
     register_routes(app)
     return app
 
@@ -208,5 +210,199 @@ def test_fetch_sync_returns_502_on_browser_error(
                 body = await r.json()
                 assert body["status"] == "error"
                 assert "FakePage.goto" in body["error"]
+
+    _run(_go())
+
+
+# ─── /fetch (async) ─────────────────────────────────────────────────
+def test_fetch_async_enqueues(make_deps, fake_redis) -> None:
+    from spider import state
+
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                r = await client.post(
+                    "/fetch",
+                    data=orjson.dumps({"url": "https://example.com/asyn"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert r.status == 200
+                body = await r.json()
+                assert body["queued"] is True
+                assert body["url"] == "https://example.com/asyn"
+                assert await state.queue_depth(fake_redis) == 1
+
+    _run(_go())
+
+
+def test_fetch_async_rejects_layer1_ssrf(make_deps, fake_redis) -> None:
+    from spider import state
+
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                r = await client.post(
+                    "/fetch",
+                    data=orjson.dumps({"url": "http://127.0.0.1/"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert r.status == 400
+                assert await state.queue_depth(fake_redis) == 0
+
+    _run(_go())
+
+
+def test_fetch_async_returns_503_when_redis_absent(make_deps) -> None:
+    deps, _ = make_deps()
+    app = _build_test_app(deps)  # no redis
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                r = await client.post(
+                    "/fetch",
+                    data=orjson.dumps({"url": "https://example.com/"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert r.status == 503
+
+    _run(_go())
+
+
+# ─── /feeds ─────────────────────────────────────────────────────────
+def test_feeds_add_list_delete(make_deps, fake_redis) -> None:
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                # Initial list is empty.
+                r = await client.get("/feeds")
+                body = await r.json()
+                assert body == {"feeds": []}
+
+                # Add a feed.
+                r = await client.post(
+                    "/feeds",
+                    data=orjson.dumps({
+                        "url": "https://feed.example/rss",
+                        "name": "test feed",
+                        "interval_s": 1800,
+                    }),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert r.status == 200
+                added = await r.json()
+                feed_id = added["id"]
+                assert added["url"] == "https://feed.example/rss"
+                assert added["interval_s"] == 1800
+
+                # Re-list includes it.
+                r = await client.get("/feeds")
+                body = await r.json()
+                assert len(body["feeds"]) == 1
+                assert body["feeds"][0]["id"] == feed_id
+
+                # GET /feeds/{id}.
+                r = await client.get(f"/feeds/{feed_id}")
+                assert r.status == 200
+                assert (await r.json())["id"] == feed_id
+
+                # GET unknown id returns 404.
+                r = await client.get("/feeds/deadbeef")
+                assert r.status == 404
+
+                # DELETE removes it.
+                r = await client.delete(f"/feeds/{feed_id}")
+                assert r.status == 200
+
+                # Double-delete returns 404.
+                r = await client.delete(f"/feeds/{feed_id}")
+                assert r.status == 404
+
+    _run(_go())
+
+
+def test_feeds_add_blocks_unsafe_url(make_deps, fake_redis) -> None:
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                r = await client.post(
+                    "/feeds",
+                    data=orjson.dumps({"url": "http://localhost/feed.xml"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert r.status == 400
+
+    _run(_go())
+
+
+def test_feeds_poll_returns_404_for_unknown(make_deps, fake_redis) -> None:
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                r = await client.post("/feeds/nope/poll")
+                assert r.status == 404
+
+    _run(_go())
+
+
+# ─── /jobs ──────────────────────────────────────────────────────────
+def test_jobs_endpoint_returns_recorded(make_deps, fake_redis) -> None:
+    from spider import state
+
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            await state.record_job(fake_redis, {
+                "id": "job1",
+                "url": "https://example.com/",
+                "status": "ok",
+                "ms": 100,
+                "ts": 1_700_000_000_000,
+            })
+            async with TestClient(server) as client:
+                r = await client.get("/jobs?limit=10")
+                assert r.status == 200
+                body = await r.json()
+                assert len(body["jobs"]) == 1
+                assert body["jobs"][0]["id"] == "job1"
+
+    _run(_go())
+
+
+# ─── /health expanded ───────────────────────────────────────────────
+def test_health_with_redis_returns_counts(make_deps, fake_redis) -> None:
+    from spider import state
+
+    deps, _ = make_deps()
+    app = _build_test_app(deps, redis=fake_redis)
+
+    async def _go() -> None:
+        async with TestServer(app) as server:
+            await state.enqueue(fake_redis, "https://example.com/")
+            async with TestClient(server) as client:
+                r = await client.get("/health")
+                body = await r.json()
+                assert body["ok"] is True
+                assert body["queue"] == 1
+                assert body["feeds"] == 0
+                assert body["seen"] == 0
+                assert body["jobs"] == 0
 
     _run(_go())

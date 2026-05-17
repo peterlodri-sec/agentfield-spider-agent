@@ -4,6 +4,12 @@ The fakes here mimic just enough of CloakBrowser / aiohttp.ClientSession
 to drive the v1 fetch pipeline without any network or browser process.
 The real implementations are exercised in dev / smoke tests; in CI we
 keep tests deterministic and offline.
+
+Redis is faked via the ``fakeredis`` package — the async client is a
+drop-in for ``redis.asyncio.Redis`` for the operations we use (HSET /
+HGETALL / HDEL / HGET / SADD / SREM / SCARD / SISMEMBER / SRANDMEMBER /
+LPUSH / LLEN / LTRIM / BRPOP / ZADD / ZCARD / ZREVRANGE /
+ZREMRANGEBYRANK).
 """
 from __future__ import annotations
 
@@ -11,6 +17,19 @@ import contextlib
 from typing import Any
 
 import pytest
+
+
+@pytest.fixture
+def fake_redis():
+    """Async in-memory Redis substitute for tests.
+
+    Returns a fresh instance per test (no cross-test state). Uses
+    ``decode_responses=False`` to match the production client wired in
+    ``spider_server._on_startup``.
+    """
+    from fakeredis.aioredis import FakeRedis
+
+    return FakeRedis(decode_responses=False)
 
 
 # ─── fake page (CloakBrowser / Playwright surface) ───────────────────
