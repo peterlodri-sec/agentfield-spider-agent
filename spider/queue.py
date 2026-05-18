@@ -21,7 +21,8 @@ from typing import Any
 
 import orjson
 
-from .fetch import FetchDeps, fetch_one
+from .dispatch import dispatch_fetch
+from .fetch import FetchDeps
 from .log import log
 from .sinks.chroma import should_sink, sink_fetch_outcome
 from .state import K_QUEUE, enqueue, mark_seen, record_job
@@ -36,10 +37,17 @@ async def run_and_record(
     url: str,
     *,
     source: str = "manual",
+    use_browser: bool = False,
+    proxy: str | None = None,
 ) -> dict[str, Any]:
-    """Call ``fetch_one`` and record the outcome.
+    """Call ``dispatch_fetch`` and record the outcome.
 
-    Always returns the same dict ``fetch_one`` did, with ``source``
+    The dispatcher routes by URL kind (github / hn / reddit /
+    generic). ``use_browser=True`` forces the browser-rendered path
+    regardless of URL kind. ``proxy`` overrides ``SPIDER_PROXY_URL``
+    for the specialized HTTP fetchers (browser path uses env proxy).
+
+    Always returns the dispatcher's flat-dict, with ``source``
     added for the jobs ZSET. Side effects on Redis:
       - successful fetch (status="ok") -> SADD ``crawler:seen``
       - every outcome -> ZADD ``crawler:jobs``
@@ -50,7 +58,9 @@ async def run_and_record(
     If ``redis`` is None the recording is skipped (useful for
     standalone tests of the fetch pipeline alone).
     """
-    result = await fetch_one(deps, url)
+    result = await dispatch_fetch(
+        deps, url, use_browser=use_browser, proxy=proxy,
+    )
     result["source"] = source
     if redis is not None:
         if result.get("status") == "ok":

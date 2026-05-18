@@ -10,9 +10,10 @@ Web fetch + RSS/Atom feed polling for the agent fleet. CloakBrowser-backed
 
 ## Status
 
-v1 complete. Both surfaces wired, k3s manifests in `deploy/k3s/`. End-to-end
-smoke against a real CloakBrowser still requires `docker compose up` or
-a k3s rollout — see "Local quick start" below.
+v1.1 — URL-kind dispatcher + outbound proxy. `/fetch/sync` now routes
+by URL shape (GitHub / HN / Reddit hit official APIs; everything else
+goes through CloakBrowser). Proxy support via `SPIDER_PROXY_URL` for
+phone-as-egress setups; see `docs/phone-as-proxy.md`.
 
 ## Capability
 
@@ -29,7 +30,7 @@ a k3s rollout — see "Local quick start" below.
 | AgentField | `spider-agent.sitemap_parse(url, max_urls=1000, queue=False)` | `{url, urls: [...], count, queued}` |
 | AgentField | `spider-agent.screenshot(url, full_page=True)` | `{ok, png_b64, ms}` |
 | AgentField | `spider-agent.extract(url, selector, attr=None)` | `{ok, matches: [...], ms}` |
-| HTTP | `POST /fetch/sync {url}` | same dict as `fetch(sync=True)` |
+| HTTP | `POST /fetch/sync {url, use_browser?, proxy?}` | same dict as `fetch(sync=True)`, enriched per URL kind |
 | HTTP | `POST /fetch {url}` | `{queued: true, url}` (Redis-backed worker) |
 | HTTP | `POST /feeds {url, interval_s?, name?}` | `{id, url, ...}` |
 | HTTP | `GET /feeds` / `GET /feeds/{id}` / `DELETE /feeds/{id}` / `POST /feeds/{id}/poll` | feed CRUD + force-poll |
@@ -55,6 +56,42 @@ a k3s rollout — see "Local quick start" below.
 
 Both processes share `spider/` (the browser pool, fetch pipeline,
 politeness, security) so the two surfaces never drift.
+
+## URL-kind dispatcher
+
+`/fetch/sync` (and the async dispatcher) routes by URL shape before
+falling through to the browser:
+
+| URL pattern | Fetcher | Surface |
+|---|---|---|
+| `github.com/{owner}/{repo}` | `spider/fetchers/github.py` | REST API + base64-decoded README |
+| `github.com/{owner}/{repo}/issues/{N}` | `spider/fetchers/github.py` | REST API |
+| `news.ycombinator.com/item?id={N}` | `spider/fetchers/hn.py` | Firebase API; recurses into GitHub fetcher if the linked URL is a repo |
+| `reddit.com/...` | `spider/fetchers/reddit.py` | redirect-follow + `.json` with browser UA + stripped tracking params |
+| anything else | `spider/fetch.py:fetch_one` | the original CloakBrowser-rendered path |
+
+Each specialized fetcher returns the same flat-dict shape as
+`fetch_one` (with extra keys: `kind`, `name`, `description`,
+`metadata`), so callers that only read `status` / `title` / `text`
+keep working.
+
+Force the browser path explicitly with `use_browser: true` on the
+request payload (or pass `use_browser=True` from Python).
+
+## Outbound proxy
+
+When `SPIDER_PROXY_URL` is set in the environment, ALL outbound HTTP
+egresses through it — specialized fetchers, the redirect walker,
+robots.txt, and the CloakBrowser pool's Chromium process.
+
+Phone-as-egress setup (Termux SOCKS5, Tailscale exit node, or a
+small Linux box on a phone hotspot) is documented in
+[`docs/phone-as-proxy.md`](docs/phone-as-proxy.md).
+
+Per-call override: `/fetch/sync` accepts a `proxy` field on the
+payload. The override applies to the HTTP fetchers (github, hn,
+reddit) only; the browser pool is shared across requests, so its
+proxy is fixed at pool launch.
 
 ## Local quick start
 

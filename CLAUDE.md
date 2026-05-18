@@ -33,9 +33,23 @@ Default if you're unsure: `spider-agent` for "scrape N pages",
   `spider_server.py` runs the HTTP server on :11700. Two processes, one
   image, separate services in compose. In k3s: two containers in one pod
   (sidecar pattern) so the browser pool stays single-tenant per replica.
+- **URL dispatcher:** `spider/dispatch.py:dispatch_fetch` classifies the
+  URL (github / github-issue / hn / reddit / generic) and routes to the
+  matching fetcher in `spider/fetchers/`. Generic falls through to the
+  browser-rendered `fetch_one()` path. Each fetcher returns a flat-dict
+  matching `fetch_one`'s shape — same keys (`id`, `url`, `status`,
+  `title`, `text`, `ms`, `ts`) plus optional richer fields (`kind`,
+  `name`, `description`, `metadata`). The routes layer + jobs ZSET
+  contract is unchanged.
 - **Browser:** CloakBrowser (replaces Scrapling). Source-level Chromium
   stealth patches; Playwright-compatible. Binary auto-fetched at first
   run (~200 MB), cached on a persistent volume in k3s.
+- **Outbound proxy:** `SPIDER_PROXY_URL` env applies to ALL outbound
+  HTTP — specialized fetchers, redirect walker, robots.txt, and the
+  CloakBrowser pool (Chromium launched with the proxy). Per-call
+  `proxy=` on `/fetch/sync` overrides for HTTP fetchers only. The
+  browser pool is shared and its proxy is fixed at pool launch. Phone
+  setup guide: `docs/phone-as-proxy.md`.
 - **Storage:** Redis. `crawler:queue` (LIST), `crawler:seen` (SET),
   `crawler:feeds` (HASH), `crawler:jobs` (ZSET). External in production;
   bundled as a sidecar in `docker-compose.yml` for local dev.
@@ -112,15 +126,36 @@ against any seed URL. Other surfaces (`/fetch/sync`, `/sitemap/parse`,
 
 ## Hard rejections
 
-- Topic-driven crawling, search-engine fan-out, reranker scoring — those
-  live in rag-stack's crawler and are explicitly out of scope. See the
-  approved plan.
 - pocket / rag-pocket ingestion. The fetch returns text; callers persist
   if they want.
 - Reddit-specific stealth (was in the Go spider — `reddit_stealth.go`).
-  Out of scope for v1.
-- Adding extra browser backends. CloakBrowser is the only backend.
-- Bypassing `spider/security.py` for SSRF — all fetches must be gated.
+  Out of scope. The reddit FETCHER (`spider/fetchers/reddit.py`) is
+  API-based, not stealth — uses the `.json` endpoint with a browser
+  UA + stripped tracking params.
+- Bypassing `spider/security.py` for SSRF on the BROWSER path.
+  Specialized HTTP fetchers (github / hn / reddit) hit known public
+  APIs whose hosts are fixed (api.github.com,
+  hacker-news.firebaseio.com, reddit.com), so the URL-construction is
+  controlled by the fetcher and the SSRF gate doesn't apply to those
+  outbound calls. The routes layer still runs layer-1 SSRF on the
+  inbound URL before dispatch.
+- Per-call BROWSER proxy. Pool is shared across requests; swapping
+  the egress mid-flight breaks in-flight calls. To use a different
+  proxy for one browser request, either restart the pool with a new
+  `SPIDER_PROXY_URL`, or force `use_browser: false` so an HTTP
+  fetcher honors the per-call `proxy` field.
+
+## Roadmap (PR-B onward)
+
+- **PR-B:** consolidate web-search engines (Linkup / Perplexity surfaces /
+  Brave / DDG / Tavily / GitHub Code Search / HN Algolia) into spider.
+  web-search-agent + pplx-agent become thin proxies until full deprecation.
+- **PR-C:** Docling integration for PDF / Word / HTML structured parse
+  (auto-detect Content-Type and route arxiv PDFs etc. through docling).
+- **PR-D:** Puppeteer-Chromium pool as alternate browser backend.
+  `browser='cloak' | 'puppeteer' | 'auto'`. Lifts the implicit
+  "CloakBrowser only" architecture rule.
+- **PR-E:** delete web-search-agent + pplx-agent code; archive repos.
 
 ## Delivery contract
 

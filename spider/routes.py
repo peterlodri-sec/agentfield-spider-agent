@@ -130,6 +130,17 @@ async def fetch_async(request: web.Request) -> web.Response:
 async def fetch_sync(request: web.Request) -> web.Response:
     """``POST /fetch/sync`` — fetch inline, return text.
 
+    Request body::
+
+        {
+          "url": "https://...",
+          "use_browser": false,   // optional; force the browser path
+                                  // (otherwise URL kind decides)
+          "proxy": "..."          // optional per-call proxy; overrides
+                                  // SPIDER_PROXY_URL for HTTP fetchers
+                                  // only (browser pool is shared)
+        }
+
     Status codes:
       200 — ok
       204 — empty content (< 100 chars)
@@ -137,9 +148,17 @@ async def fetch_sync(request: web.Request) -> web.Response:
       403 — robots disallowed
       502 — fetch / extract error
 
+    URL routing (when ``use_browser`` is unset / false):
+      github.com/{owner}/{repo}       -> GitHub REST API
+      github.com/.../issues/N         -> GitHub REST API
+      news.ycombinator.com/item?id=N  -> HN Firebase API
+      reddit.com/...                  -> Reddit .json
+      anything else                   -> CloakBrowser-rendered (the
+                                          original v1 path)
+
     Records the outcome to ``crawler:jobs`` when Redis is available,
-    so observability via ``GET /jobs`` is uniform across the sync and
-    async paths.
+    so observability via ``GET /jobs`` is uniform across sync, async,
+    and specialized-fetcher paths.
     """
     payload, err = await _read_json(request)
     if err:
@@ -151,9 +170,21 @@ async def fetch_sync(request: web.Request) -> web.Response:
         log("ssrf", url=url, gate="layer1")
         return _json({"error": "url failed SSRF gate", "url": url}, status=400)
 
+    use_browser = bool((payload or {}).get("use_browser", False))
+    proxy_override = (payload or {}).get("proxy")
+    if proxy_override is not None and not isinstance(proxy_override, str):
+        return _json(
+            {"error": "proxy must be a string if provided"}, status=400,
+        )
+
     deps: FetchDeps = request.app["deps"]
     redis = request.app.get("redis")
-    result = await run_and_record(deps, redis, url, source="api-sync")
+    result = await run_and_record(
+        deps, redis, url,
+        source="api-sync",
+        use_browser=use_browser,
+        proxy=proxy_override,
+    )
 
     status = result.get("status")
     if status == "ok":

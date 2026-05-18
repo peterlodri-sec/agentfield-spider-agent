@@ -30,6 +30,7 @@ import time
 from typing import Any
 
 from .log import log
+from .proxy import cloakbrowser_launch_kwargs
 
 # ─── env knobs ──────────────────────────────────────────────────────
 HEADLESS = os.environ.get("FETCH_HEADLESS", "1") == "1"
@@ -90,9 +91,11 @@ class CloakBrowserPool:
         else:
             launcher = self._launch_factory
 
+        proxy_kwargs = cloakbrowser_launch_kwargs()
         t0 = time.perf_counter()
         self._browser = await launcher(
             headless=HEADLESS,
+            **proxy_kwargs,
             **self._kwargs,
         )
         log(
@@ -101,6 +104,7 @@ class CloakBrowserPool:
             ms=int((time.perf_counter() - t0) * 1000),
             headless=HEADLESS,
             max_pages=BROWSER_MAX_PAGES,
+            proxy=bool(proxy_kwargs),
         )
 
     async def _close_locked(self, *, reason: str) -> None:
