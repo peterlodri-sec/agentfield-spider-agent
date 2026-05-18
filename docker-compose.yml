@@ -52,6 +52,36 @@ services:
     # Redis flushes its AOF / saves on SIGTERM; 15s is generous.
     stop_grace_period: 15s
 
+  # ─── Lightpanda CDP server (BETA browser backend) ──────────────────
+  # Opt-in. Activate with `docker compose --profile lightpanda up`. To
+  # make spider-agent USE it, set BROWSER_BACKEND=lightpanda in .env
+  # (or pass `browser: lightpanda` on the /fetch/sync payload per-call).
+  #
+  # The container is tiny (~30 MB) — leaving it always-on is fine.
+  # We gate behind a profile only so users who don't care about the
+  # alternate backend don't have an extra service running.
+  lightpanda:
+    build:
+      context: .
+      dockerfile: Dockerfile.lightpanda
+    profiles:
+      - lightpanda
+    networks:
+      - my-agent_default
+    ports:
+      - "9222:9222"
+    restart: unless-stopped
+    healthcheck:
+      # Lightpanda's CDP root serves /json/version with a JSON body
+      # listing the protocol version. If this works, the browser is up.
+      test:
+        - "CMD-SHELL"
+        - "wget -q -O- http://localhost:9222/json/version > /dev/null"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 10s
+
 networks:
   my-agent_default:
     external: true

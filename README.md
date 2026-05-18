@@ -10,10 +10,11 @@ Web fetch + RSS/Atom feed polling for the agent fleet. CloakBrowser-backed
 
 ## Status
 
-v1.1 — URL-kind dispatcher + outbound proxy. `/fetch/sync` now routes
-by URL shape (GitHub / HN / Reddit hit official APIs; everything else
-goes through CloakBrowser). Proxy support via `SPIDER_PROXY_URL` for
-phone-as-egress setups; see `docs/phone-as-proxy.md`.
+v1.2 — Adds Docling for structured doc parsing (PDF/Word/PPT) + a
+beta `lightpanda` browser backend alongside CloakBrowser. Modern
+tooling: `pyproject.toml` + uv + ruff + mypy/pyright strict on new
+code. The dispatcher now routes 5 URL kinds (github / github-issue /
+hn / reddit / docling) before falling through to the browser pool.
 
 ## Capability
 
@@ -68,7 +69,8 @@ falling through to the browser:
 | `github.com/{owner}/{repo}/issues/{N}` | `spider/fetchers/github.py` | REST API |
 | `news.ycombinator.com/item?id={N}` | `spider/fetchers/hn.py` | Firebase API; recurses into GitHub fetcher if the linked URL is a repo |
 | `reddit.com/...` | `spider/fetchers/reddit.py` | redirect-follow + `.json` with browser UA + stripped tracking params |
-| anything else | `spider/fetch.py:fetch_one` | the original CloakBrowser-rendered path |
+| `*.pdf` / `*.docx` / `*.pptx` / etc. | `spider/docling_parser.py` | Docling-parsed markdown + tables (heavy dep, opt-in) |
+| anything else | `spider/fetch.py:fetch_one` | CloakBrowser- or Lightpanda-rendered path |
 
 Each specialized fetcher returns the same flat-dict shape as
 `fetch_one` (with extra keys: `kind`, `name`, `description`,
@@ -77,6 +79,54 @@ keep working.
 
 Force the browser path explicitly with `use_browser: true` on the
 request payload (or pass `use_browser=True` from Python).
+
+## Browser backends
+
+| Backend | Module | Size | Use when |
+|---|---|---:|---|
+| `cloak` (default) | `spider/browsers/cloak.py` | ~200 MB Chromium | Stealth needed (Cloudflare, Akamai, aggressive WAFs) |
+| `lightpanda` (beta) | `spider/browsers/lightpanda.py` | ~30 MB image | Bulk crawls of static / lightly-dynamic sites; latency or memory matter |
+
+Pick the default via `BROWSER_BACKEND=cloak|lightpanda` env. Per-call
+override on `/fetch/sync` payload:
+
+```json
+{
+  "url": "https://example.com",
+  "use_browser": true,
+  "browser": "lightpanda"
+}
+```
+
+The dispatcher lazy-instantiates the alternate pool on first use — the
+unused backend has zero memory cost until it's needed.
+
+Lightpanda runs as a separate process:
+
+```bash
+docker compose --profile lightpanda up -d
+```
+
+(See `Dockerfile.lightpanda` — it `FROM lightpanda/browser:nightly`
+and serves CDP on `:9222`.)
+
+## Docling (PDF / Word / PowerPoint structured parse)
+
+URLs ending in a document extension (`.pdf`, `.docx`, `.pptx`,
+`.xlsx`, `.odt`, ...) route to Docling instead of the browser pool —
+Chromium can render PDFs but only as a single unstructured canvas;
+Docling extracts markdown + tables + page counts.
+
+Heavy dependency: docling pulls in transformers + torch and ~1.5 GB
+of ML models on first use. Not bundled in the default image; install
+via the `[docling]` extra:
+
+```bash
+pip install -e ".[docling]"
+```
+
+When docling isn't installed, the parser returns a clean
+`status="error"` envelope rather than crashing.
 
 ## Outbound proxy
 
@@ -112,11 +162,28 @@ curl -X POST http://localhost:11700/fetch/sync \
 
 | Concern | Library | Notes |
 |---|---|---|
-| Browser | [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) | Stealth Chromium with source-level patches. Playwright-compatible. ~200 MB binary auto-fetched on first run. |
+| Browser (default) | [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) | Stealth Chromium with source-level patches. Playwright-compatible. ~200 MB binary auto-fetched on first run. |
+| Browser (beta) | [Lightpanda](https://github.com/lightpanda-io/browser) | Zig browser exposing CDP. Tiny (~10 MB binary). Connect via Playwright `connect_over_cdp`. |
+| Doc parse (opt-in) | [Docling](https://github.com/docling-project/docling) | PDF/Word/PPT/Excel → structured markdown + tables. ~1.5 GB models on first use. |
 | RSS/Atom | feedparser | Standard. |
 | Redis | redis-py (asyncio) | Queue + seen-set + feeds + jobs. |
-| HTTP | aiohttp | Server + outbound. |
+| HTTP | aiohttp + httpx | Server (aiohttp) + outbound HTTP fetchers (httpx). |
 | Agent framework | agentfield | The fleet's primitive. |
+
+## Tooling
+
+| Tool | Config | Purpose |
+|---|---|---|
+| `uv` | `pyproject.toml` `[tool.uv]` | Faster pip replacement; `uv sync` + `uv lock` |
+| `ruff` | `[tool.ruff]` | Lint + format; py312 target |
+| `mypy` | `[tool.mypy]` strict | Type check (per-module opt-outs for older modules) |
+| `pyright` | `[tool.pyright]` strict on new modules | Editor + CI types |
+| `pytest` | `[tool.pytest.ini_options]` asyncio_mode=auto | Tests |
+
+Strict-typed modules (PEP 695 syntax, no `Dict`/`List` imports):
+`spider/browsers/**`, `spider/docling_parser.py`, `spider/dispatch.py`,
+`spider/proxy.py`, `spider/fetchers/**`. Older modules migrate in
+follow-up PRs.
 
 ## License + redistribution note
 

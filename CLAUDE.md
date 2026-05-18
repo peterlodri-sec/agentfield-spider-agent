@@ -145,17 +145,72 @@ against any seed URL. Other surfaces (`/fetch/sync`, `/sitemap/parse`,
   `SPIDER_PROXY_URL`, or force `use_browser: false` so an HTTP
   fetcher honors the per-call `proxy` field.
 
-## Roadmap (PR-B onward)
+## Browser backends (PR-BCD)
+
+`spider/browsers/` is the registry. Two backends ship today:
+
+| Backend | Module | Heft | When to use |
+|---|---|---:|---|
+| `cloak` | `spider/browsers/cloak.py` | ~200 MB Chromium | Default. Stealth source-level Chromium. Use for aggressively anti-bot sites (Cloudflare, Akamai). |
+| `lightpanda` | `spider/browsers/lightpanda.py` | ~30 MB image | BETA. Zig browser with CDP. Tiny + fast (~100ms cold start, ~50MB/page). Coverage is partial — no cookies API, partial JS framework support. Falls back to cloak for sites it can't handle. |
+
+Pick the default with `BROWSER_BACKEND=cloak|lightpanda` env. Per-call
+override on `/fetch/sync` via the `browser` field. The dispatcher
+lazy-instantiates the alternate pool on first use — unused backends
+have zero cost.
+
+Lightpanda runs as a separate process (compose service / k8s sidecar
+/ standalone), not in the spider container. `Dockerfile.lightpanda`
+builds the image (FROM the official `lightpanda/browser:nightly`).
+`docker-compose.yml` defines it under the `lightpanda` profile —
+start with `docker compose --profile lightpanda up`.
+
+## Docling (PR-BCD)
+
+`spider/docling_parser.py` handles PDF / Word / PowerPoint / Excel /
+OpenDocument URLs. The dispatcher's `classify()` recognises common
+document extensions and routes to docling instead of the browser
+pool (Chromium can render PDFs but only as a single canvas with no
+extractable text or table structure).
+
+Heavy dependency: docling pulls in transformers + torch, ~1.5 GB of
+ML models on first use. Install via the `[docling]` extra in
+`pyproject.toml`; the standard image doesn't bundle it. Building
+with `--build-arg INSTALL_DOCLING=1` (TODO: add to Dockerfile) opts
+in. If docling isn't installed when the parser is invoked, the
+function returns a `status="error"` envelope rather than raising —
+keeps the dispatcher contract clean.
+
+## Tooling
+
+`pyproject.toml` is the canonical project config (modern uv-friendly
+shape):
+
+  - dependencies + optional extras (`docling`, `lightpanda`, `dev`)
+  - ruff config (E/W/F/I/B/UP/SIM/RET/PIE/TID/C4/PYI, py312 target)
+  - mypy strict (with per-module opt-outs for older modules)
+  - pyright strict on the new code (`spider/browsers/**`,
+    `spider/docling_parser.py`, `spider/dispatch.py`,
+    `spider/proxy.py`, `spider/fetchers/**`)
+  - pytest asyncio_mode=auto
+
+`requirements.txt` is kept in sync for back-compat with the existing
+Dockerfile install step. Regenerate from pyproject via
+`uv export --no-hashes -o requirements.txt`.
+
+New modules use Python 3.12 syntax: PEP 695 `type X = ...` aliases,
+`X | None` unions, no `Dict`/`List` imports. Existing modules
+gradually move into the strict-pyright list as they're typed up.
+
+## Roadmap (remaining)
 
 - **PR-B:** consolidate web-search engines (Linkup / Perplexity surfaces /
   Brave / DDG / Tavily / GitHub Code Search / HN Algolia) into spider.
   web-search-agent + pplx-agent become thin proxies until full deprecation.
-- **PR-C:** Docling integration for PDF / Word / HTML structured parse
-  (auto-detect Content-Type and route arxiv PDFs etc. through docling).
-- **PR-D:** Puppeteer-Chromium pool as alternate browser backend.
-  `browser='cloak' | 'puppeteer' | 'auto'`. Lifts the implicit
-  "CloakBrowser only" architecture rule.
 - **PR-E:** delete web-search-agent + pplx-agent code; archive repos.
+- (Maybe) Puppeteer pool as a third backend. Lightpanda + CloakBrowser
+  cover the common cases; adding Puppeteer is now a `spider/browsers/`
+  drop-in if a use case shows up.
 
 ## Delivery contract
 

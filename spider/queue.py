@@ -39,13 +39,16 @@ async def run_and_record(
     source: str = "manual",
     use_browser: bool = False,
     proxy: str | None = None,
+    browser: str | None = None,
 ) -> dict[str, Any]:
     """Call ``dispatch_fetch`` and record the outcome.
 
     The dispatcher routes by URL kind (github / hn / reddit /
-    generic). ``use_browser=True`` forces the browser-rendered path
-    regardless of URL kind. ``proxy`` overrides ``SPIDER_PROXY_URL``
-    for the specialized HTTP fetchers (browser path uses env proxy).
+    docling / generic). ``use_browser=True`` forces the browser-rendered
+    path regardless of URL kind. ``proxy`` overrides ``SPIDER_PROXY_URL``
+    for the specialized HTTP fetchers. ``browser`` picks the rendering
+    backend for the browser path: ``"cloak"`` (default) or
+    ``"lightpanda"`` (beta).
 
     Always returns the dispatcher's flat-dict, with ``source``
     added for the jobs ZSET. Side effects on Redis:
@@ -59,7 +62,10 @@ async def run_and_record(
     standalone tests of the fetch pipeline alone).
     """
     result = await dispatch_fetch(
-        deps, url, use_browser=use_browser, proxy=proxy,
+        deps, url,
+        use_browser=use_browser,
+        proxy=proxy,
+        browser=browser,
     )
     result["source"] = source
     if redis is not None:

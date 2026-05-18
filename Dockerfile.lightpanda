@@ -1,0 +1,48 @@
+# Lightpanda CDP server. BETA browser backend for spider-agent.
+#
+# Lightpanda (https://github.com/lightpanda-io/browser) is a Zig-based
+# headless browser exposing Chrome DevTools Protocol. Tiny (~10 MB),
+# fast (~100 ms cold start), low memory (~50 MB/page). CDP coverage is
+# incomplete — see spider/browsers/lightpanda.py docstring for caveats.
+#
+# We use the official ``lightpanda/browser:nightly`` image directly;
+# rebuilding from source requires Zig and ~minutes. The image is
+# multi-arch (amd64 + arm64).
+#
+# Build (from the spider-agent repo root):
+#
+#     docker build -f Dockerfile.lightpanda -t agentfield-lightpanda:latest .
+#
+# Run standalone (without compose):
+#
+#     docker run --rm -p 9222:9222 agentfield-lightpanda:latest
+#
+# The compose path is cleaner — see docker-compose.yml for the
+# integrated setup.
+
+FROM lightpanda/browser:nightly
+
+# The upstream image already sets ENTRYPOINT to `lightpanda`. We pin
+# the serve flags + bind address so the container exposes CDP on
+# 0.0.0.0:9222 (reachable from the spider-agent service over the
+# my-agent_default network).
+#
+# --obey-robots is on by default; spider-agent's own robots policy
+# applies at the redirect-walker layer too, so this is belt-and-braces.
+# --log-format pretty is human-readable; switch to json if you pipe
+# into a structured-log aggregator.
+
+ENV LIGHTPANDA_HOST=0.0.0.0
+ENV LIGHTPANDA_PORT=9222
+ENV LIGHTPANDA_LOG_LEVEL=info
+ENV LIGHTPANDA_LOG_FORMAT=pretty
+
+EXPOSE 9222
+
+# The base image's ENTRYPOINT is `lightpanda`; we just supply args.
+# Wrapping in `sh -c` so env vars expand at run time, not build time.
+CMD ["sh", "-c", "lightpanda serve --obey-robots \
+    --host=${LIGHTPANDA_HOST} \
+    --port=${LIGHTPANDA_PORT} \
+    --log-level=${LIGHTPANDA_LOG_LEVEL} \
+    --log-format=${LIGHTPANDA_LOG_FORMAT}"]

@@ -176,6 +176,11 @@ async def fetch_sync(request: web.Request) -> web.Response:
         return _json(
             {"error": "proxy must be a string if provided"}, status=400,
         )
+    browser_override = (payload or {}).get("browser")
+    if browser_override is not None and not isinstance(browser_override, str):
+        return _json(
+            {"error": "browser must be a string if provided"}, status=400,
+        )
 
     deps: FetchDeps = request.app["deps"]
     redis = request.app.get("redis")
@@ -184,6 +189,7 @@ async def fetch_sync(request: web.Request) -> web.Response:
         source="api-sync",
         use_browser=use_browser,
         proxy=proxy_override,
+        browser=browser_override,
     )
 
     status = result.get("status")

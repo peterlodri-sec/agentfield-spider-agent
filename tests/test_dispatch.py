@@ -31,9 +31,16 @@ from spider.dispatch import classify
         ("https://old.reddit.com/r/python/", "reddit"),
         ("https://reddit.com/r/python/comments/abc/", "reddit"),
         ("https://www.reddit.com/r/AgentsOfAI/s/SHORT", "reddit"),
+        # docling (URL extension)
+        ("https://arxiv.org/pdf/1706.03762.pdf", "docling"),
+        ("https://example.com/spec.docx", "docling"),
+        ("https://example.com/deck.pptx", "docling"),
+        ("https://example.com/sheet.xlsx", "docling"),
+        ("https://example.com/paper.PDF?ref=hn", "docling"),  # case + query
         # generic
         ("https://example.com/", "generic"),
         ("https://waha.devlike.pro/docs/", "generic"),
+        ("https://example.com/page.html", "generic"),  # html doesn't route to docling
         ("ftp://example.com/file", "generic"),
         # garbage
         ("", "generic"),

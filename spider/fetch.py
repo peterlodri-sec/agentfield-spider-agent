@@ -90,11 +90,21 @@ def rewrite_url(url: str) -> tuple[str, str | None]:
 
 
 # ─── core fetch ──────────────────────────────────────────────────────
-async def fetch_one(deps: FetchDeps, url: str) -> dict[str, Any]:
-    """Fetch a URL through CloakBrowser and return a job-record dict.
+async def fetch_one(
+    deps: FetchDeps,
+    url: str,
+    *,
+    pool: Any = None,
+) -> dict[str, Any]:
+    """Fetch a URL through the browser pool and return a job-record dict.
 
     Always returns; never raises. Callers decide whether to surface an
     error as a 4xx/5xx (sync surface) or just record it (async surface).
+
+    The ``pool`` kwarg overrides ``deps.pool`` for this call only —
+    used by the dispatcher to render through an alternate backend
+    (e.g. Lightpanda) without persistent reconfiguration. The pool
+    must satisfy the ``spider.browsers.BrowserPool`` Protocol.
 
     Return shape::
 
@@ -180,8 +190,10 @@ async def fetch_one(deps: FetchDeps, url: str) -> dict[str, Any]:
     # token for the actual browser fetch.
     await deps.bucket.acquire(host_of(fetch_url))
 
+    active_pool = pool if pool is not None else deps.pool
+
     try:
-        async with deps.pool.lease() as page:
+        async with active_pool.lease() as page:
             await page.goto(
                 fetch_url,
                 wait_until="networkidle" if NETWORK_IDLE else "load",

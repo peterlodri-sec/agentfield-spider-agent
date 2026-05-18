@@ -5,8 +5,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Docling is opt-in (~1.5 GB transformers+torch on first model
+# download). To enable:
+#   docker build --build-arg INSTALL_DOCLING=1 .
+# Models cache under HF cache; mount a volume in prod or expect a
+# one-time download on the first PDF / Word request.
+#
+# Lightpanda support is included by default (just the Playwright
+# Python client; ~10 MB). The Lightpanda BINARY runs in a sibling
+# container — see Dockerfile.lightpanda + docker-compose.yml.
+ARG INSTALL_DOCLING=0
+
+COPY requirements.txt pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    if [ "${INSTALL_DOCLING}" = "1" ]; then \
+        pip install --no-cache-dir "docling>=2.0"; \
+    fi
 
 COPY main.py spider_server.py ./
 COPY reasoners ./reasoners

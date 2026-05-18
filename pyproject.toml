@@ -1,0 +1,138 @@
+# Modern Python project config. uv-friendly (`uv sync`, `uv lock`),
+# ruff + mypy + pyright configured here so editors and CI agree.
+#
+# requirements.txt is kept in sync with the `dependencies` list below
+# for back-compat with the existing Dockerfile + CI install step. To
+# regenerate it: `uv export --no-hashes -o requirements.txt`.
+
+[project]
+name = "agentfield-spider-agent"
+version = "0.3.0"
+description = "Spider/crawler agent — CloakBrowser/Lightpanda + URL dispatcher + Docling + RSS/Atom + Redis queue"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "AgentField fleet" }]
+keywords = ["agentfield", "spider", "crawler", "docling", "lightpanda"]
+
+dependencies = [
+    "agentfield",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "aiohttp>=3.10",
+    "redis>=5",
+    "feedparser>=6",
+    "orjson",
+    "beautifulsoup4>=4.12",
+    "cloakbrowser",
+]
+
+[project.optional-dependencies]
+docling = [
+    "docling>=2.0",
+]
+lightpanda = [
+    # Lightpanda speaks CDP; we drive it via Playwright's Python SDK.
+    # No `playwright install` is needed — we never launch a browser
+    # locally, only connect_over_cdp to the Lightpanda server.
+    "playwright>=1.40",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "fakeredis>=2",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pyright>=1.1.380",
+]
+
+[project.urls]
+Homepage = "https://github.com/peterlodri-sec/agentfield-spider-agent"
+Issues = "https://github.com/peterlodri-sec/agentfield-spider-agent/issues"
+
+# ─── uv ──────────────────────────────────────────────────────────────
+# This is an application, not a redistributable library. uv treats it
+# as such (no build backend needed) when `package = false`.
+[tool.uv]
+package = false
+dev-dependencies = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "fakeredis>=2",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pyright>=1.1.380",
+]
+
+# ─── ruff ────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "__pycache__", ".pytest_cache", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", # pycodestyle
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # bugbear
+    "UP",     # pyupgrade
+    "SIM",    # simplify
+    "RET",    # return-statement issues
+    "PIE",
+    "TID",    # tidy imports (no relative beyond parent etc.)
+    "C4",     # comprehension misuse
+    "PYI",    # stub files
+]
+ignore = [
+    "E501", # line-too-long is handled by the formatter / line-length cfg
+    "B008", # function call as default arg (FastAPI Depends pattern)
+    "SIM108", # ternary preference is taste-dependent
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can have long names / fixture defaults.
+"tests/**/*.py" = ["B", "TID"]
+
+# ─── mypy ────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true     # cloakbrowser / docling / playwright stubs not always available
+warn_unreachable = true
+warn_unused_ignores = true
+disallow_untyped_decorators = false  # aiohttp/agentfield decorators are dynamic
+
+# Older modules (predating the strict-types policy) can opt out
+# per-module here — keeps the strict gate over NEW modules while we
+# migrate the older ones over time.
+[[tool.mypy.overrides]]
+module = ["spider.crawl", "spider.feeds", "spider.queue", "spider.routes", "spider.sinks.*"]
+disallow_untyped_defs = false
+
+# ─── pyright ─────────────────────────────────────────────────────────
+[tool.pyright]
+include = ["spider", "main.py", "spider_server.py"]
+exclude = ["**/__pycache__", ".venv", "build", "dist"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+# Strict modules — new code where we hold the line. As old code is
+# typed up, modules move into this list.
+strict = [
+    "spider/browsers/**",
+    "spider/docling_parser.py",
+    "spider/dispatch.py",
+    "spider/proxy.py",
+    "spider/fetchers/**",
+]
+reportImplicitOverride = "warning"
+reportUnknownArgumentType = "none"     # too noisy with dynamic libs
+reportUnknownMemberType = "none"       # ditto
+
+# ─── pytest ──────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:aiohttp.*",
+]
