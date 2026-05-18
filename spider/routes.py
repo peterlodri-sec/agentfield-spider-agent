@@ -573,6 +573,32 @@ async def sessions_create(request: web.Request) -> web.Response:
             status=400,
         )
 
+    # Evasion knobs. ``persona`` names a preset from
+    # spider.evasion.identity; ``evasion_rate_per_min`` overrides the
+    # default per-session token bucket.
+    persona = body.get("persona")
+    if persona is not None and not isinstance(persona, str):
+        return _json({"error": "persona must be a string"}, status=400)
+    if persona is not None:
+        from .evasion import list_personas
+
+        if persona not in list_personas():
+            return _json(
+                {
+                    "error": (
+                        f"unknown persona {persona!r}. Known: "
+                        f"{', '.join(list_personas())}"
+                    ),
+                },
+                status=400,
+            )
+    evasion_rate_per_min = body.get("evasion_rate_per_min")
+    if evasion_rate_per_min is not None and not isinstance(evasion_rate_per_min, int):
+        return _json(
+            {"error": "evasion_rate_per_min must be an integer"},
+            status=400,
+        )
+
     # Backend selection: default to the primary pool, allow override.
     from .browsers import get_or_create_pool, normalize_backend
 
@@ -597,6 +623,8 @@ async def sessions_create(request: web.Request) -> web.Response:
             user_agent=user_agent,
             viewport=viewport,
             backend_label=backend,
+            persona=persona,
+            evasion_rate_per_min=evasion_rate_per_min,
         )
     except Exception as e:
         return _json(

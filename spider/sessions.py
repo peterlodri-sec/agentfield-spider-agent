@@ -57,6 +57,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .evasion import EvasionBase, EvasionConfig
 from .log import log
 
 # ─── env knobs ──────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ class Session:
     info: SessionInfo
     context: Any  # Playwright BrowserContext
     pool_ref: Any = None  # Used to detect "did the pool change?"
+    evasion: EvasionBase | None = None  # Bot-detection countermeasures
 
 
 # ─── manager ────────────────────────────────────────────────────────
@@ -138,6 +140,8 @@ class SessionManager:
         user_agent: str | None = None,
         viewport: dict[str, int] | None = None,
         backend_label: str = "cloak",
+        persona: str | None = None,
+        evasion_rate_per_min: int | None = None,
     ) -> SessionInfo:
         """Create a new session backed by a fresh BrowserContext.
 
@@ -146,6 +150,19 @@ class SessionManager:
         fall back to opening it via ``pool.lease()`` for compatibility
         with the older CloakBrowserPool that doesn't expose
         ``get_browser`` directly).
+
+        ``persona`` is an optional name from ``spider.evasion``'s
+        ``PRESETS`` (call ``list_personas()`` for valid names). When
+        set, the session gets a pinned identity (UA + locale + TZ +
+        viewport + geo + Sec-CH-UA all coherent). Explicit
+        ``user_agent`` / ``viewport`` kwargs override the persona's
+        defaults.
+
+        ``evasion_rate_per_min`` overrides the default per-session
+        request budget (60). Set to a number <= 0 to disable. Setting
+        either ``persona`` or ``evasion_rate_per_min`` attaches an
+        ``EvasionBase`` to the session; otherwise the session has no
+        evasion layer (legacy behavior preserved).
         """
         sid = uuid.uuid4().hex[:12]
         # Monotonic last_used — if two sessions are created in the
@@ -157,6 +174,16 @@ class SessionManager:
             max_existing = max(s.info.last_used for s in self._sessions.values())
             now = max(now, max_existing + 1)
 
+        # Build the evasion layer (if any) BEFORE opening the context
+        # so we can pull persona-derived kwargs (UA, locale, TZ,
+        # viewport, geo, headers) into the new_context call.
+        evasion: EvasionBase | None = None
+        if persona is not None or evasion_rate_per_min is not None:
+            cfg = EvasionConfig(persona=persona, backend=backend_label)
+            if evasion_rate_per_min is not None:
+                cfg.rate_per_min = evasion_rate_per_min
+            evasion = EvasionBase(cfg)
+
         # Open the browser if it isn't already, and reach into its
         # context constructor. Both LightpandaPool and CloakBrowserPool
         # have a `_browser` attribute populated after `_open` runs;
@@ -164,13 +191,18 @@ class SessionManager:
         browser = await _get_browser(pool)
 
         # Context construction kwargs — same names Playwright uses, so
-        # both backends accept the call signature.
+        # both backends accept the call signature. Persona-derived
+        # kwargs go in first; explicit caller kwargs override.
         ctx_kwargs: dict[str, Any] = {}
+        if evasion is not None:
+            ctx_kwargs.update(evasion.context_kwargs())
         if user_agent:
             ctx_kwargs["user_agent"] = user_agent
         if viewport:
             ctx_kwargs["viewport"] = viewport
         context = await browser.new_context(**ctx_kwargs)
+        if evasion is not None:
+            await evasion.apply_to_context(context)
 
         info = SessionInfo(
             id=sid,
@@ -181,7 +213,7 @@ class SessionManager:
             n_pages_opened=0,
             metadata=metadata or {},
         )
-        session = Session(info=info, context=context, pool_ref=pool)
+        session = Session(info=info, context=context, pool_ref=pool, evasion=evasion)
 
         async with self._lock:
             self._sessions[sid] = session
@@ -195,6 +227,20 @@ class SessionManager:
         if s is None:
             return None
         return s.info
+
+    async def get_evasion(self, session_id: str) -> EvasionBase | None:
+        """Return the session's ``EvasionBase``, or ``None`` if the
+        session doesn't exist or wasn't created with evasion.
+
+        Used by the fetch pipeline to call ``check_rate()`` before
+        ``page.goto`` and ``post_goto(page)`` after. Returning ``None``
+        means "skip evasion for this fetch" — both ``check_rate`` and
+        ``post_goto`` are guarded by the None check at the callsite.
+        """
+        s = self._sessions.get(session_id)
+        if s is None:
+            return None
+        return s.evasion
 
     async def list(self) -> list[SessionInfo]:
         """Snapshot of all session infos, newest-touched first."""

@@ -177,17 +177,33 @@ async def _fetch_one_core(
 
     active_pool = pool if pool is not None else deps.pool
 
+    # Optional per-session evasion layer. Cheap lookup; returns None
+    # when no session_id was passed, the session has no evasion, or
+    # the SessionManager itself is unavailable.
+    evasion = None
+    if session_id and deps.sessions is not None:
+        evasion = await deps.sessions.get_evasion(session_id)
+
     try:
         if session_id and deps.sessions is not None:
             lease_cm = deps.sessions.lease_page(session_id, pool=active_pool)
         else:
             lease_cm = active_pool.lease()
         async with lease_cm as page:
+            # Per-session rate gate (no-op when evasion is None or
+            # rate_per_min <= 0). Runs BEFORE goto so the bucket
+            # protects the goto itself.
+            if evasion is not None:
+                await evasion.check_rate()
             await page.goto(
                 fetch_url,
                 wait_until="networkidle" if NETWORK_IDLE else "load",
                 timeout=FETCH_TIMEOUT_MS,
             )
+            # Light behavioral simulation after goto succeeds.
+            # No-op when evasion is None or behavioral_dwell is False.
+            if evasion is not None:
+                await evasion.post_goto(page)
             await dismiss_banners(page)
             title, text = await extract_title_text(page)
     except SpiderError:
