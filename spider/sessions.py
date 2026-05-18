@@ -142,6 +142,7 @@ class SessionManager:
         backend_label: str = "cloak",
         persona: str | None = None,
         evasion_rate_per_min: int | None = None,
+        storage_state: dict[str, Any] | None = None,
     ) -> SessionInfo:
         """Create a new session backed by a fresh BrowserContext.
 
@@ -200,6 +201,8 @@ class SessionManager:
             ctx_kwargs["user_agent"] = user_agent
         if viewport:
             ctx_kwargs["viewport"] = viewport
+        if storage_state is not None:
+            ctx_kwargs["storage_state"] = storage_state
         context = await browser.new_context(**ctx_kwargs)
         if evasion is not None:
             await evasion.apply_to_context(context)
@@ -250,6 +253,17 @@ class SessionManager:
         ]
         valid.sort(key=lambda i: i.last_used, reverse=True)
         return valid
+
+    async def export_storage_state(self, session_id: str) -> dict[str, Any]:
+        """Snapshot Playwright storage_state from a live session context.
+
+        Raises ``KeyError`` if the session is unknown or expired.
+        """
+        s = self._sessions.get(session_id)
+        if s is None:
+            raise KeyError(session_id)
+        state = await s.context.storage_state()
+        return dict(state)
 
     async def close(self, session_id: str) -> bool:
         async with self._lock:

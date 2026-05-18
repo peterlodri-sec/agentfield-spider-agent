@@ -540,7 +540,8 @@ async def sessions_create(request: web.Request) -> web.Response:
           "metadata": {"user_id": "..."},   // free-form
           "user_agent": "...",              // override default UA
           "viewport": {"width": 1280, "height": 720},
-          "backend": "cloak" | "lightpanda"  // default: env-configured
+          "backend": "cloak" | "lightpanda", // default: env-configured
+          "profile": "my-saved-profile"     // hydrate from ProfileStore (503/404)
         }
 
     Returns the session info dict; the ``id`` field is what callers
@@ -596,6 +597,19 @@ async def sessions_create(request: web.Request) -> web.Response:
             status=400,
         )
 
+    profile = body.get("profile")
+    if profile is not None and not isinstance(profile, str):
+        return _json({"error": "profile must be a string"}, status=400)
+    storage_state: dict[str, Any] | None = None
+    if profile is not None:
+        store = request.app.get("profiles")
+        if store is None or not store.enabled:
+            return _json({"error": "profiles disabled (no postgres)"}, status=503)
+        storage_state = await store.fetch_storage_state(profile)
+        if storage_state is None:
+            return _json({"error": "profile not found", "name": profile}, status=404)
+        await store.touch(profile)
+
     # Backend selection: default to the primary pool, allow override.
     from .browsers import get_or_create_pool, normalize_backend
 
@@ -622,6 +636,7 @@ async def sessions_create(request: web.Request) -> web.Response:
             backend_label=backend,
             persona=persona,
             evasion_rate_per_min=evasion_rate_per_min,
+            storage_state=storage_state,
         )
     except Exception as e:
         return _json(
@@ -653,15 +668,41 @@ async def sessions_get(request: web.Request) -> web.Response:
 
 
 async def sessions_delete(request: web.Request) -> web.Response:
-    """``DELETE /sessions/{id}`` — close a session, freeing its context."""
+    """``DELETE /sessions/{id}`` — close a session, freeing its context.
+
+    Query ``?persist_profile=name`` exports ``context.storage_state()`` to
+    postgres via ``ProfileStore.upsert()`` before the context is closed.
+    """
     sessions = request.app.get("sessions")
     if sessions is None:
         return _json({"error": "session manager not configured"}, status=503)
     sid = request.match_info["id"]
+    persist_profile = request.query.get("persist_profile")
+    if persist_profile is not None:
+        if not persist_profile.strip():
+            return _json({"error": "persist_profile must be a non-empty name"}, status=400)
+        store = request.app.get("profiles")
+        if store is None or not store.enabled:
+            return _json({"error": "profiles disabled (no postgres)"}, status=503)
+        info = await sessions.get(sid)
+        if info is None:
+            return _json({"error": "session not found"}, status=404)
+        try:
+            state = await sessions.export_storage_state(sid)
+        except KeyError:
+            return _json({"error": "session not found"}, status=404)
+        await store.upsert(
+            name=persist_profile,
+            backend=info.backend,
+            storage_state=state,
+        )
     closed = await sessions.close(sid)
     if not closed:
         return _json({"error": "session not found"}, status=404)
-    return _json({"ok": True, "session_id": sid})
+    out: dict[str, Any] = {"ok": True, "session_id": sid}
+    if persist_profile is not None:
+        out["persisted_profile"] = persist_profile
+    return _json(out)
 
 
 def _primary_backend_for(deps: FetchDeps) -> str:

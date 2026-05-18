@@ -38,6 +38,10 @@ class _FakeContext:
         self.pages: list[_FakePage] = []
         self.closed = False
         self.kwargs: dict[str, Any] = {}
+        self._storage_state: dict[str, Any] = {"cookies": [], "origins": []}
+
+    async def storage_state(self) -> dict[str, Any]:
+        return dict(self._storage_state)
 
     async def new_page(self) -> _FakePage:
         p = _FakePage()
@@ -93,6 +97,33 @@ def test_create_session_returns_info() -> None:
     assert info.n_pages_opened == 0
     # The pool got a new_context() call.
     assert len(pool._browser.contexts) == 1
+
+
+def test_create_session_applies_storage_state() -> None:
+    pool = _FakePool()
+    mgr = SessionManager()
+    ss = {"cookies": [{"name": "sid", "value": "abc"}], "origins": []}
+
+    async def _go():
+        return await mgr.create(pool=pool, storage_state=ss)
+
+    _run(_go())
+    ctx = pool._browser.contexts[0]
+    assert ctx.kwargs.get("storage_state") == ss
+
+
+def test_export_storage_state_before_close() -> None:
+    pool = _FakePool()
+    mgr = SessionManager()
+
+    async def _go():
+        info = await mgr.create(pool=pool)
+        state = await mgr.export_storage_state(info.id)
+        await mgr.close(info.id)
+        return state
+
+    state = _run(_go())
+    assert state == {"cookies": [], "origins": []}
 
 
 def test_create_session_forwards_ua_and_viewport() -> None:
