@@ -47,3 +47,8 @@ cloakbrowser_cache/
 deploy/k3s/secret.yaml
 deploy/k3s/secret.*.yaml
 !deploy/k3s/secret.example.yaml
+
+# claude-routine runtime artifacts
+.routine-state.json
+.routine-paused
+scripts/claude-routine/runs/
