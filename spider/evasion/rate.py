@@ -12,6 +12,7 @@ until at least one token is available, then consumes it.
 
 Disabled (no-op) when ``rate_per_min <= 0``.
 """
+
 from __future__ import annotations
 
 import asyncio

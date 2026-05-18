@@ -585,10 +585,7 @@ async def sessions_create(request: web.Request) -> web.Response:
         if persona not in list_personas():
             return _json(
                 {
-                    "error": (
-                        f"unknown persona {persona!r}. Known: "
-                        f"{', '.join(list_personas())}"
-                    ),
+                    "error": (f"unknown persona {persona!r}. Known: {', '.join(list_personas())}"),
                 },
                 status=400,
             )

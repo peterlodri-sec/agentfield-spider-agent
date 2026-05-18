@@ -41,6 +41,7 @@ skips overlapping JS patches on the cloak backend to avoid signal
 collision (double-patching is its own fingerprint). Lightpanda gets
 the full treatment.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -98,9 +99,7 @@ class EvasionBase:
         )
         # Disabled when rate_per_min <= 0; RateLimiter rejects < 1.
         self._rate: RateLimiter | None = (
-            RateLimiter(self.config.rate_per_min)
-            if self.config.rate_per_min > 0
-            else None
+            RateLimiter(self.config.rate_per_min) if self.config.rate_per_min > 0 else None
         )
 
     # ─── lifecycle hooks ────────────────────────────────────────────

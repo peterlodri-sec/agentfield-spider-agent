@@ -14,6 +14,7 @@ a real (small) population.
 Applied via ``context.add_init_script(WEBRTC_BLOCK_JS)`` so the
 override is installed before any page script runs.
 """
+
 from __future__ import annotations
 
 # Replaces RTC-related globals with getters that throw. Runs once per

@@ -16,6 +16,7 @@ Backend-aware: techniques that overlap with CloakBrowser's built-in
 patches are skipped on the cloak backend to avoid double-patching
 fingerprints. Lightpanda gets the full treatment.
 """
+
 from __future__ import annotations
 
 from .base import EvasionBase, EvasionConfig

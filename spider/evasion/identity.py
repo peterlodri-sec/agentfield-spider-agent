@@ -22,6 +22,7 @@ place — not at every callsite. When adding a new persona:
 Don't randomize per-request. The persona is FIXED for the session;
 randomizing it is itself a fingerprint.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -179,9 +180,7 @@ def get_persona(name: str) -> Persona:
     """Return the named persona; raises ``KeyError`` on unknown name."""
     p = PRESETS.get(name)
     if p is None:
-        raise KeyError(
-            f"unknown persona: {name!r}. Known: {', '.join(sorted(PRESETS.keys()))}"
-        )
+        raise KeyError(f"unknown persona: {name!r}. Known: {', '.join(sorted(PRESETS.keys()))}")
     return p
 
 

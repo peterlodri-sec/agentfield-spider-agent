@@ -19,6 +19,7 @@ Tuning constants are conservative to keep total ``post_goto`` time
 under ~1.5s. Adjust ``DWELL_MAX_MS`` if profiles start failing the
 "too fast" engagement-time tier of bot detection.
 """
+
 from __future__ import annotations
 
 import asyncio

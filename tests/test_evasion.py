@@ -4,6 +4,7 @@ All offline — no real browser. Uses a FakeContext that captures the
 init scripts and the new_context kwargs we pass, so we can assert
 the persona's identity flows through to the right call sites.
 """
+
 from __future__ import annotations
 
 import asyncio
