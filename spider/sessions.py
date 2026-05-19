@@ -195,6 +195,9 @@ class SessionManager:
             if evasion_rate_per_min is not None:
                 cfg.rate_per_min = evasion_rate_per_min
             if warming_enabled:
+                # warming_enabled is True iff warming is "search-click" or "hub";
+                # the assert lets mypy narrow `warming` out of `... | None`.
+                assert warming is not None
                 cfg.warming = warming
             if warming_queries is not None and warming_enabled:
                 cfg.warming_queries = warming_queries
