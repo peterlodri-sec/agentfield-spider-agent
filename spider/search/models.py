@@ -8,6 +8,7 @@ Compatible-on-purpose with ``web-search-agent/reasoners/models.py`` so
 the migration in PR-E (VIB-30) is a thin rename rather than a shape
 change.
 """
+
 from __future__ import annotations
 
 from typing import Literal

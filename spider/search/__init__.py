@@ -20,6 +20,7 @@ land in:
   - PR-B-3: new engines (``tavily``, ``ddg``, ``hn``, ``github``).
   - PR-B-4: ``mode="merge"`` path with RRF.
 """
+
 from __future__ import annotations
 
 from .base import SearchEngine

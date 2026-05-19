@@ -6,6 +6,7 @@ module-based shape (web-search-agent) so each engine can cache its
 auth headers, hold per-instance rate-limiter state, and be tested
 without monkey-patching modules.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
