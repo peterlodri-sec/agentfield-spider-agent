@@ -2,7 +2,7 @@
 
 **Status:** design — implementation phased into PR-B-1..4
 **Linear:** [VIB-29](https://linear.app/vibepeter/issue/VIB-29) (this design) ▪ [VIB-28](https://linear.app/vibepeter/issue/VIB-28) (dispatcher impl) ▪ [VIB-30](https://linear.app/vibepeter/issue/VIB-30) (deprecate predecessors)
-**Mirrored to:** [Linear document](https://linear.app/vibepeter/document/search-consolidation-design) (kept in sync; this file is source of truth)
+**Mirrored to:** [Linear document](https://linear.app/vibepeter/document/search-consolidation-pr-b-design-93b0630827c4) (kept in sync; this file is source of truth)
 
 ## Why
 
