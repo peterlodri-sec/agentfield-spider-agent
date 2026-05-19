@@ -20,6 +20,7 @@ pattern matching Linear's ``identifier`` like ``vib-XX``), this script:
 Does NOT auto-merge or auto-rebase. That's intentional — humans + the
 assigned agent own the merge gate.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -125,11 +126,17 @@ def run(cmd: list[str], *, cwd: str | None = None, check: bool = True) -> str:
 def list_my_open_prs(repo: str) -> list[dict[str, Any]]:
     out = run(
         [
-            "gh", "pr", "list",
-            "--author", "@me",
-            "--state", "open",
-            "--json", "number,title,headRefName,baseRefName,isDraft,mergeable,url,commits,statusCheckRollup",
-            "--limit", "50",
+            "gh",
+            "pr",
+            "list",
+            "--author",
+            "@me",
+            "--state",
+            "open",
+            "--json",
+            "number,title,headRefName,baseRefName,isDraft,mergeable,url,commits,statusCheckRollup",
+            "--limit",
+            "50",
         ],
         cwd=repo,
     )

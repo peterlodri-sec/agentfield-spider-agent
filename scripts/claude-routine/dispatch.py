@@ -22,6 +22,7 @@ Flow per issue:
 
 Designed to be invoked by a Hetzner-side Claude Code session via cron.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -304,12 +305,18 @@ def open_pr_with_kickoff(
     )
     pr_url = run(
         [
-            "gh", "pr", "create",
+            "gh",
+            "pr",
+            "create",
             "--draft",
-            "--base", "main",
-            "--head", branch,
-            "--title", f"{identifier}: {title}",
-            "--body", pr_body,
+            "--base",
+            "main",
+            "--head",
+            branch,
+            "--title",
+            f"{identifier}: {title}",
+            "--body",
+            pr_body,
         ],
         cwd=repo,
     )
@@ -374,7 +381,9 @@ def filter_issues(
         if agent_filter is not None and agent != agent_filter:
             continue
         if branch_has_open_pr(issue["branchName"], repo=repo):
-            print(f"  skip {issue['identifier']}: branch {issue['branchName']!r} already has open PR")
+            print(
+                f"  skip {issue['identifier']}: branch {issue['branchName']!r} already has open PR"
+            )
             continue
         out.append(issue)
 
@@ -461,8 +470,11 @@ def main() -> int:
             # Show what we would have posted.
             handle = AGENTS[agent]["handle"]
             kickoff = build_kickoff(
-                handle=handle, agent=agent, model=model,
-                issue=issue, branch=issue["branchName"],
+                handle=handle,
+                agent=agent,
+                model=model,
+                issue=issue,
+                branch=issue["branchName"],
             )
             print()
             print("  --- [dry-run] PR kickoff comment ---")
