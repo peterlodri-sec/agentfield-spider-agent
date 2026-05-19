@@ -31,6 +31,7 @@ hn / reddit / docling) before falling through to the browser pool.
 | AgentField | `spider-agent.sitemap_parse(url, max_urls=1000, queue=False)` | `{url, urls: [...], count, queued}` |
 | AgentField | `spider-agent.screenshot(url, full_page=True)` | `{ok, png_b64, ms}` |
 | AgentField | `spider-agent.extract(url, selector, attr=None)` | `{ok, matches: [...], ms}` |
+| AgentField | `spider-agent.act(task, session_id, model?, max_steps?, allowed_hosts?)` | `{status, task, session_id, model, ms, result?, urls_visited?, steps_taken?, is_done?}` |
 | HTTP | `POST /fetch/sync {url, use_browser?, proxy?}` | same dict as `fetch(sync=True)`, enriched per URL kind |
 | HTTP | `POST /fetch {url}` | `{queued: true, url}` (Redis-backed worker) |
 | HTTP | `POST /feeds {url, interval_s?, name?}` | `{id, url, ...}` |
@@ -41,6 +42,7 @@ hn / reddit / docling) before falling through to the browser pool.
 | HTTP | `POST /sitemap/parse {url, queue?, max_urls?}` | `{url, urls: [...], count, queued}` |
 | HTTP | `POST /screenshot {url, full_page?}` | `{ok, png_b64, ms}` |
 | HTTP | `POST /extract {url, selector, attr?}` | `{ok, matches: [...], ms}` |
+| HTTP | `POST /act {task, session_id, model?, max_steps?, allowed_hosts?}` | `{status, task, session_id, model, ms, result?, urls_visited?, steps_taken?, is_done?}` |
 | HTTP | `GET /jobs?limit=50` | recent fetch outcomes |
 | HTTP | `GET /health` | snapshot |
 
@@ -145,6 +147,63 @@ Manual push helper:
 DOCKER_USER=your-user scripts/build-docling-image.sh
 ```
 
+## Browser-use Agent (POST /act, spider-agent.act)
+
+Natural-language browser automation against an existing session's
+`BrowserContext` — no second browser is launched. The Agent loop
+executes against the same Playwright page opened in `POST /sessions`,
+reusing cookies, cache, and DOM state.
+
+```json
+POST /act
+{
+  "task": "find the latest release notes on docs.example.com",
+  "session_id": "<from POST /sessions>",
+  "model": "openai/gpt-4o",
+  "max_steps": 25,
+  "allowed_hosts": ["example.com", ".docs.example.com"]
+}
+```
+
+Every URL navigation the Agent attempts passes through a Playwright
+`page.route` handler that runs SSRF validation (`is_safe_external_url_with_dns`)
+and, when configured, the `SPIDER_AGENT_ALLOWED_HOSTS` allowlist.
+Unsafe URLs abort with `blockedbyclient` before any bytes leave the container.
+
+Optional dependency — install via the `[browser-use]` extra:
+
+```bash
+pip install agentfield-spider-agent[browser-use]
+# or
+uv sync --extra browser-use
+```
+
+When the extra is not installed, `POST /act` returns HTTP 501 with
+`{"status":"error","error":"browser-use is not installed..."}`. The
+route plumbing works — operators can integrate the session pipeline
+before the heavy LLM dependency is on the image.
+
+**SSRF allowlist** (`SPIDER_AGENT_ALLOWED_HOSTS`):
+
+- Comma-separated host list. Empty / unset disables the allowlist
+  (only the base SSRF gate runs).
+- Prefix an entry with a dot (`.example.com`) to match the bare domain
+  and any subdomain.
+- Per-call `allowed_hosts` in the request body is unioned with the
+  env-level set.
+- The allowlist is an *additional* filter on top of
+  `is_safe_external_url_with_dns` — private IPs / loopback / blocked
+  hostnames are always rejected regardless.
+
+**Smoke test:**
+
+```bash
+bash scripts/check-act.sh
+```
+
+Returns 200 when browser-use is installed and working; 501 if the extra
+is not installed (which is treated as a pass — route plumbing is healthy).
+
 ## Outbound proxy
 
 When `SPIDER_PROXY_URL` is set in the environment, ALL outbound HTTP
@@ -214,6 +273,7 @@ bootstrap script.
 | Browser (default) | [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) | Stealth Chromium with source-level patches. Playwright-compatible. ~200 MB binary auto-fetched on first run. |
 | Browser (beta) | [Lightpanda](https://github.com/lightpanda-io/browser) | Zig browser exposing CDP. Tiny (~10 MB binary). Connect via Playwright `connect_over_cdp`. |
 | Doc parse (opt-in) | [Docling](https://github.com/docling-project/docling) | PDF/Word/PPT/Excel → structured markdown + tables. ~1.5 GB models on first use. |
+| Browser Agent (opt-in) | [browser-use](https://github.com/browser-use/browser-use) | Natural-language task automation via LLM Agent loop. Heavy dep: langchain + browser-use. Install `[browser-use]` extra. |
 | RSS/Atom | feedparser | Standard. |
 | Redis | redis-py (asyncio) | Queue + seen-set + feeds + jobs. |
 | HTTP | aiohttp + httpx | Server (aiohttp) + outbound HTTP fetchers (httpx). |
