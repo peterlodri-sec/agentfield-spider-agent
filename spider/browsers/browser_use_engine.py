@@ -151,7 +151,7 @@ def _build_llm(model: str) -> Any:
     ``OPENROUTER_API_KEY`` (env) is required. Falls back to ``OPENAI_API_KEY``
     for convenience in deployments that already set the OpenAI key.
     """
-    from langchain_openai import ChatOpenAI  # type: ignore[import-not-found]
+    from langchain_openai import ChatOpenAI
 
     api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -201,24 +201,24 @@ def _coerce_result(history: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     # urls_visited: most versions expose .urls() returning list[str]
     try:
-        urls = history.urls()  # type: ignore[no-untyped-call]
+        urls = history.urls()
         if isinstance(urls, list):
             out["urls_visited"] = [str(u) for u in urls]
     except Exception:  # noqa: BLE001
         pass
     # final answer: .final_result() or last action's extracted_content
     try:
-        final = history.final_result()  # type: ignore[no-untyped-call]
+        final = history.final_result()
         if final is not None:
             out["result"] = final
     except Exception:  # noqa: BLE001
         pass
     # step count
     with contextlib.suppress(Exception):
-        out["steps_taken"] = int(history.number_of_steps())  # type: ignore[no-untyped-call]
+        out["steps_taken"] = int(history.number_of_steps())
     # success / failure indicator
     with contextlib.suppress(Exception):
-        out["is_done"] = bool(history.is_done())  # type: ignore[no-untyped-call]
+        out["is_done"] = bool(history.is_done())
     if not out:
         out["result"] = str(history)
     return out
@@ -267,7 +267,7 @@ async def browser_act(
     # Lazy imports — gated on the [browser-use] extra. Catching
     # ImportError keeps the surface clean when the extra isn't installed.
     try:
-        from browser_use import Agent, BrowserSession  # type: ignore[import-not-found]
+        from browser_use import Agent, BrowserSession
     except ImportError as e:
         return _missing_dep_envelope(task, detail=f"ImportError: {e}")
 
@@ -300,7 +300,7 @@ async def browser_act(
             except TypeError:
                 # Older browser-use versions accept the page as a kwarg
                 # to Agent directly. Fall back to that shape.
-                browser_session = None  # type: ignore[assignment]
+                browser_session = None
 
             agent_kwargs: dict[str, Any] = {"task": task, "llm": llm}
             if browser_session is not None:
