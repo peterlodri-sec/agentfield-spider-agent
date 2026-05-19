@@ -155,9 +155,7 @@ def _build_llm(model: str) -> Any:
 
     api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY (or OPENAI_API_KEY) is required for browser_act"
-        )
+        raise RuntimeError("OPENROUTER_API_KEY (or OPENAI_API_KEY) is required for browser_act")
     return ChatOpenAI(
         model=model,
         base_url=OPENROUTER_BASE_URL,
@@ -176,7 +174,9 @@ async def _install_ssrf_route(page: Any, allowed: frozenset[str] | None) -> None
     """
     from spider.security import is_host_allowed, is_safe_external_url_with_dns
 
-    async def _gate(route: Any, request: Any) -> None:  # pragma: no cover - exercised via integration
+    async def _gate(
+        route: Any, request: Any
+    ) -> None:  # pragma: no cover - exercised via integration
         url = request.url
         if not await is_safe_external_url_with_dns(url):
             log("browser_act", state="ssrf-block", url=url[:120])
