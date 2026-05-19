@@ -921,6 +921,143 @@ async def vnc_conn(request: web.Request) -> web.Response:
     )
 
 
+# ─── /act (browser_act sidecar path) ────────────────────────────────
+async def act_handler(request: web.Request) -> web.Response:
+    """``POST /act`` — run a browser-use Agent against a session's context.
+
+    Body::
+
+        {
+          "task": "find the latest blog post on example.com and return its title",  # required
+          "session_id": "<id from POST /sessions>",                                  # required
+          "model": "openai/gpt-4o",                                                  # optional, default BROWSER_USE_DEFAULT_MODEL
+          "max_steps": 25,                                                           # optional, [1, 100]
+          "allowed_hosts": ["example.com", ".docs.example.com"]                      # optional, merges with SPIDER_AGENT_ALLOWED_HOSTS env
+        }
+
+    Reuses the session's existing ``BrowserContext`` — no second
+    browser is launched. Every URL the Agent navigates to passes
+    ``is_safe_external_url_with_dns`` (SSRF gate) and, if any allowlist
+    is configured, ``is_host_allowed``. Unsafe URLs abort at the
+    Playwright route layer.
+
+    Returns the flat dict from ``browser_act`` — ``status`` is ``"ok"``
+    or ``"error"``, and ``error`` carries the diagnostic on failure.
+    ``status`` is also reflected in the HTTP code (200 / 400 / 404 /
+    502) so callers don't need to peek inside the body to branch.
+    """
+    payload, err = await _read_json(request)
+    if err:
+        return _json({"status": "error", "error": err}, status=400)
+    body = payload or {}
+
+    task_raw = body.get("task")
+    if not isinstance(task_raw, str) or not task_raw.strip():
+        return _json(
+            {"status": "error", "error": "task is required and must be a non-empty string"},
+            status=400,
+        )
+    task = task_raw.strip()
+
+    session_id = body.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return _json(
+            {"status": "error", "error": "session_id is required and must be a string"},
+            status=400,
+        )
+
+    model = body.get("model")
+    if model is not None and not isinstance(model, str):
+        return _json({"status": "error", "error": "model must be a string"}, status=400)
+
+    max_steps_raw = body.get("max_steps")
+    if max_steps_raw is None:
+        from .browsers.browser_use_engine import DEFAULT_MAX_STEPS as _DEFAULT_MAX
+
+        max_steps = _DEFAULT_MAX
+    elif not isinstance(max_steps_raw, int) or isinstance(max_steps_raw, bool):
+        return _json(
+            {"status": "error", "error": "max_steps must be an integer"},
+            status=400,
+        )
+    elif max_steps_raw < 1 or max_steps_raw > 100:
+        return _json(
+            {"status": "error", "error": "max_steps must be in [1, 100]"},
+            status=400,
+        )
+    else:
+        max_steps = max_steps_raw
+
+    # Merge env allowlist with per-call allowlist. Both empty ⇒ no
+    # extra filter (still SSRF-gated; just no host allowlist).
+    body_allowed = body.get("allowed_hosts")
+    if body_allowed is not None and not isinstance(body_allowed, list):
+        return _json(
+            {"status": "error", "error": "allowed_hosts must be a list of strings"},
+            status=400,
+        )
+    body_allowed_set: frozenset[str] = frozenset()
+    if isinstance(body_allowed, list):
+        cleaned = []
+        for entry in body_allowed:
+            if not isinstance(entry, str):
+                return _json(
+                    {"status": "error", "error": "allowed_hosts entries must be strings"},
+                    status=400,
+                )
+            e = entry.strip().lower().rstrip(".")
+            if e:
+                cleaned.append(e)
+        body_allowed_set = frozenset(cleaned)
+
+    from .security import env_agent_allowed_hosts
+
+    allowed_hosts = body_allowed_set | env_agent_allowed_hosts()
+
+    # Resolve session manager + pool.
+    sessions = request.app.get("sessions")
+    if sessions is None:
+        return _json(
+            {"status": "error", "error": "session manager not configured"},
+            status=503,
+        )
+    info = await sessions.get(session_id)
+    if info is None:
+        return _json(
+            {"status": "error", "error": f"session not found: {session_id}"},
+            status=404,
+        )
+
+    deps: FetchDeps = request.app["deps"]
+    pool = deps.pool
+
+    from .browsers.browser_use_engine import browser_act
+
+    result = await browser_act(
+        task=task,
+        session_id=session_id,
+        sessions=sessions,
+        pool=pool,
+        model=model,
+        max_steps=max_steps,
+        allowed_hosts=allowed_hosts or None,
+    )
+
+    if result.get("status") == "ok":
+        return _json(result, status=200)
+    # Map error envelopes onto the right HTTP code.
+    err_text = str(result.get("error", "")).lower()
+    if "not installed" in err_text or "[browser-use]" in err_text:
+        # Missing optional extra — 501 Not Implemented signals "endpoint
+        # exists but the optional dep is not installed in this build".
+        return _json(result, status=501)
+    if "session not found" in err_text or "session expired" in err_text:
+        return _json(result, status=404)
+    if "different pool" in err_text:
+        return _json(result, status=409)
+    return _json(result, status=502)
+
+
 # ─── registration ───────────────────────────────────────────────────
 def register_routes(app: web.Application) -> None:
     """Wire all v1 routes into ``app``. Idempotent across distinct apps."""
@@ -948,6 +1085,7 @@ def register_routes(app: web.Application) -> None:
     # Browser-use sidecar conn URLs
     app.router.add_get("/chrome-conn", chrome_conn)
     app.router.add_get("/vnc-conn", vnc_conn)
+    app.router.add_post("/act", act_handler)
     # Sessions
     app.router.add_post("/sessions", sessions_create)
     app.router.add_get("/sessions", sessions_list)

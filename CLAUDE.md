@@ -208,6 +208,36 @@ backend's pool raises `RuntimeError`. Switch backends ⇒ new session.
 
 Persistence (storage_state to disk) is v2.
 
+## Browser-use Agent (POST /act, spider-agent.act)
+
+Natural-language browser automation against an existing session's
+`BrowserContext` — no second browser is launched. Optional dep: install
+via the `[browser-use]` extra (`pip install agentfield-spider-agent[browser-use]`
+or `uv sync --extra browser-use`). Without the extra, `POST /act`
+returns HTTP `501` with a clear "install the extra" envelope; the
+route plumbing still works.
+
+  POST /act { task, session_id, model?, max_steps?, allowed_hosts? }
+
+Implementation:
+
+- Engine: `spider/browsers/browser_use_engine.py:browser_act`. Lazy-imports
+  `browser_use.Agent` + `langchain_openai.ChatOpenAI`. LLM is pointed at
+  OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`).
+- The Agent runs against the session's existing Page; cookies / storage
+  / nav state persist across `/act` calls within the same session.
+- Every Playwright navigation passes through `page.route("**/*", _gate)`
+  → `is_safe_external_url_with_dns` *and*, when configured,
+  `is_host_allowed` (SPIDER_AGENT_ALLOWED_HOSTS). Unsafe URLs abort
+  with `blockedbyclient` before bytes leave the container.
+
+SSRF allowlist (`SPIDER_AGENT_ALLOWED_HOSTS`):
+
+- Comma-separated; empty / unset disables the allowlist (base SSRF
+  gate always runs).
+- Leading dot (`.example.com`) matches bare domain + any subdomain.
+- Per-call `allowed_hosts` body field is unioned with the env set.
+
 ## Build optimization (PR-OPT-CTX)
 
 `Dockerfile.lightpanda` and `Dockerfile.cloak` are multi-stage with:

@@ -208,6 +208,51 @@ backend's pool raises `RuntimeError`. Switch backends ⇒ new session.
 
 Persistence (storage_state to disk) is v2.
 
+## Browser-use Agent (POST /act, spider-agent.act)
+
+Natural-language browser automation against an existing session's
+`BrowserContext` — no second browser is launched.
+
+  POST /act
+    {
+      "task":          "find the latest release notes on docs.example.com",
+      "session_id":    "<from POST /sessions>",
+      "model":         "openai/gpt-4o",                 # optional
+      "max_steps":     25,                              # optional, [1, 100]
+      "allowed_hosts": ["example.com", ".docs.example.com"]  # optional
+    }
+
+The Agent loop runs inside `browser_act` in
+`spider/browsers/browser_use_engine.py`. The LLM is a LangChain
+`ChatOpenAI` pointed at OpenRouter (`OPENROUTER_API_KEY` env). Every
+navigation the Agent attempts passes through a Playwright `page.route`
+handler that runs `is_safe_external_url_with_dns` *and*, when
+configured, the `SPIDER_AGENT_ALLOWED_HOSTS` allowlist. Unsafe URLs
+abort with `blockedbyclient` before any bytes leave the container.
+
+Optional dependency — install via the `[browser-use]` extra:
+
+    pip install agentfield-spider-agent[browser-use]
+    # or
+    uv sync --extra browser-use
+
+When the extra is not installed, `POST /act` returns HTTP `501` with
+`{"status":"error","error":"browser-use is not installed..."}`. The
+route plumbing itself works — operators can integrate before the
+heavy LLM dep is on the image.
+
+SSRF allowlist (`SPIDER_AGENT_ALLOWED_HOSTS`):
+
+* Comma-separated host list. Empty / unset disables the allowlist
+  (only the base SSRF gate runs).
+* Prefix an entry with a dot (`.example.com`) to match the bare
+  domain and any subdomain.
+* Per-call `allowed_hosts` in the request body is unioned with the
+  env-level set.
+* The allowlist is an *additional* filter on top of
+  `is_safe_external_url_with_dns` — private IPs / loopback / blocked
+  hostnames are always rejected regardless.
+
 ## Build optimization (PR-OPT-CTX)
 
 `Dockerfile.lightpanda` and `Dockerfile.cloak` are multi-stage with:

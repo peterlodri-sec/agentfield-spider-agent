@@ -167,6 +167,59 @@ async def is_safe_external_url_with_dns(url: str) -> bool:
     return await is_safe_resolved_host(host, port)
 
 
+# ─── allowlist (browser_act agent navigation gate) ──────────────────
+def _parse_host_list(raw: str | None) -> frozenset[str]:
+    """Parse a comma-separated host list into a normalized frozenset.
+
+    Trims whitespace, lowercases, drops empty entries and trailing dots.
+    """
+    if not raw:
+        return frozenset()
+    parts = (p.strip().lower().rstrip(".") for p in raw.split(","))
+    return frozenset(p for p in parts if p)
+
+
+def env_agent_allowed_hosts() -> frozenset[str]:
+    """Read ``SPIDER_AGENT_ALLOWED_HOSTS`` env into a normalized set.
+
+    Empty / unset env means no allowlist (every host that passes the
+    base SSRF gate is acceptable).
+    """
+    import os as _os
+
+    return _parse_host_list(_os.environ.get("SPIDER_AGENT_ALLOWED_HOSTS"))
+
+
+def is_host_allowed(url: str, allowed: frozenset[str] | None) -> bool:
+    """Return True iff ``url``'s host is in ``allowed``.
+
+    ``allowed=None`` or an empty set disables the gate (returns True).
+    Suffix matches are supported via a leading dot: ``.example.com``
+    matches ``example.com`` and any subdomain. Bare entries match
+    exactly.
+
+    This is an ADDITIONAL filter on top of ``is_safe_external_url`` —
+    the SSRF gate is always authoritative for private / loopback ranges.
+    """
+    if not allowed:
+        return True
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    host = (u.hostname or "").lower().strip().rstrip(".")
+    if not host:
+        return False
+    for entry in allowed:
+        if entry.startswith("."):
+            suffix = entry[1:]
+            if host == suffix or host.endswith("." + suffix):
+                return True
+        elif host == entry:
+            return True
+    return False
+
+
 DEFAULT_REDIRECT_HOPS = 5
 
 
@@ -226,7 +279,9 @@ async def follow_safe_redirects(
 
 __all__ = [
     "DEFAULT_REDIRECT_HOPS",
+    "env_agent_allowed_hosts",
     "follow_safe_redirects",
+    "is_host_allowed",
     "is_safe_external_url",
     "is_safe_external_url_with_dns",
     "is_safe_resolved_host",

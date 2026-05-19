@@ -335,7 +335,54 @@ async def _extract(
         }
 
 
+async def _act(
+    task: str,
+    session_id: str,
+    *,
+    model: str | None = None,
+    max_steps: int | None = None,
+    allowed_hosts: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run a browser-use Agent on ``task`` inside ``session_id``'s context.
+
+    Proxies ``POST /act`` on the HTTP surface. Returns the same flat
+    dict shape the server returns: ``status``, ``task``, ``session_id``,
+    ``model``, ``ms``, optionally ``result`` / ``urls_visited`` /
+    ``steps_taken`` / ``is_done`` on success, or ``error`` on failure.
+    """
+    body: dict[str, Any] = {"task": task, "session_id": session_id}
+    if model:
+        body["model"] = model
+    if max_steps is not None:
+        body["max_steps"] = int(max_steps)
+    if allowed_hosts:
+        body["allowed_hosts"] = list(allowed_hosts)
+    try:
+        async with _client_factory() as client:
+            r = await client.post(f"{SPIDER_HTTP_URL}/act", json=body)
+            try:
+                payload = _response_json(r)
+            except ValueError:
+                return {
+                    "status": "error",
+                    "error": f"non-json response: HTTP {r.status_code}",
+                    "task": task,
+                    "session_id": session_id,
+                }
+            if r.status_code >= 400:
+                payload.setdefault("status_code", r.status_code)
+            return payload
+    except httpx.RequestError as e:
+        return {
+            "status": "error",
+            "error": f"{type(e).__name__}: {e}",
+            "task": task,
+            "session_id": session_id,
+        }
+
+
 __all__ = [
+    "_act",
     "_crawl",
     "_crawl_status",
     "_extract",

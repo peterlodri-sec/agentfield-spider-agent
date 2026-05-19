@@ -30,6 +30,7 @@ from typing import Any
 from agentfield import Agent
 
 from reasoners._spider import (
+    _act,
     _crawl,
     _crawl_status,
     _extract,
@@ -173,6 +174,36 @@ async def extract(
     Returns a dict with {ok, matches: [...], ms}.
     """
     return await _extract(url, selector, attr=attr)
+
+
+@app.skill()
+async def act(
+    task: str,
+    session_id: str,
+    model: str | None = None,
+    max_steps: int | None = None,
+    allowed_hosts: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run a browser-use Agent against an existing session's context.
+
+    ``task`` is a natural-language description of what to do. ``session_id``
+    must reference a session created via ``session_create`` (the Agent
+    reuses its ``BrowserContext`` — no second browser is launched).
+
+    Returns a flat dict: ``status``, ``task``, ``session_id``, ``model``,
+    ``ms``, optionally ``result`` / ``urls_visited`` / ``steps_taken``
+    / ``is_done`` on success, or ``error`` on failure. When the
+    ``[browser-use]`` install extra is not installed, returns a
+    status=error envelope describing the missing dep (the HTTP surface
+    responds 501 in that case).
+    """
+    return await _act(
+        task,
+        session_id,
+        model=model,
+        max_steps=max_steps,
+        allowed_hosts=allowed_hosts,
+    )
 
 
 if __name__ == "__main__":

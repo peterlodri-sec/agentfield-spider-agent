@@ -37,6 +37,15 @@ lightpanda = [
     # locally, only connect_over_cdp to the Lightpanda server.
     "playwright>=1.40",
 ]
+# browser-use's Agent loop + the LangChain OpenAI client (used here
+# pointed at OpenRouter — same key, same API shape, all providers).
+# Heavy: pulls in langchain + browser-use; opt in only when the
+# /act + spider-agent.act surface is needed.
+browser-use = [
+    "browser-use>=0.1",
+    "langchain-openai>=0.2",
+    "playwright>=1.40",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
