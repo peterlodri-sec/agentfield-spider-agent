@@ -11,6 +11,15 @@ payloads to temporarily route ONE request through a different proxy
 still use the env-level proxy because the pool's already running by
 the time a call arrives.
 
+Companion env var: ``SPIDER_PROXY_TRUST_INSECURE``. Opt-in TLS-verify
+bypass for outbound HTTPS — needed when the proxy does HTTPS
+interception (mitmproxy with a UA-spoof addon, for example) and the
+proxy's CA isn't installed in the spider's trust store. Without this,
+every HTTPS call surfaces ``CERTIFICATE_VERIFY_FAILED``. The "right"
+fix is to install the proxy's CA cert; this flag is the documented
+escape hatch for setups where that's impractical (ephemeral
+containers, rotating CAs, dev iteration).
+
 The setup guide for "phone as 4G/5G proxy" (Termux SOCKS5, Tailscale
 egress node, or ssh -D) lives in ``docs/phone-as-proxy.md``.
 """
@@ -21,12 +30,29 @@ import os
 from typing import Any
 
 _ENV_NAME = "SPIDER_PROXY_URL"
+_ENV_INSECURE = "SPIDER_PROXY_TRUST_INSECURE"
 
 
 def env_proxy() -> str | None:
     """Return SPIDER_PROXY_URL trimmed of whitespace, or None."""
     raw = (os.environ.get(_ENV_NAME) or "").strip()
     return raw or None
+
+
+def trust_insecure() -> bool:
+    """Return True if ``SPIDER_PROXY_TRUST_INSECURE`` is set to a truthy value.
+
+    Truthy: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
+    Anything else (unset, empty, ``0``, ``false``, ``no``, ``off``) is False.
+
+    When True, callers should skip TLS certificate verification for
+    outbound HTTPS. This is intended for MITM-style proxies (mitmproxy,
+    Charles, Fiddler) where the proxy re-signs every TLS connection
+    with its own CA. The proper fix is to install that CA in the trust
+    store; this knob is the documented escape hatch.
+    """
+    raw = (os.environ.get(_ENV_INSECURE) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def resolve_proxy(per_call: str | None = None) -> str | None:
@@ -47,9 +73,18 @@ def aiohttp_request_kwargs(per_call: str | None = None) -> dict[str, Any]:
 
     aiohttp doesn't support session-level proxy — it's per-request.
     Callers spread these kwargs into every ``get()`` / ``post()``.
+
+    When ``SPIDER_PROXY_TRUST_INSECURE`` is set, ``ssl=False`` is added
+    so aiohttp skips TLS verification (needed for MITM proxies whose CA
+    isn't in the trust store).
     """
+    out: dict[str, Any] = {}
     p = resolve_proxy(per_call)
-    return {"proxy": p} if p else {}
+    if p:
+        out["proxy"] = p
+    if trust_insecure():
+        out["ssl"] = False
+    return out
 
 
 def httpx_client_kwargs(per_call: str | None = None) -> dict[str, Any]:
@@ -58,9 +93,18 @@ def httpx_client_kwargs(per_call: str | None = None) -> dict[str, Any]:
 
     httpx supports session-level proxy; instantiate the client once per
     fetch with this spread and you're done.
+
+    When ``SPIDER_PROXY_TRUST_INSECURE`` is set, ``verify=False`` is
+    added so httpx skips TLS verification (needed for MITM proxies
+    whose CA isn't in the trust store).
     """
+    out: dict[str, Any] = {}
     p = resolve_proxy(per_call)
-    return {"proxy": p} if p else {}
+    if p:
+        out["proxy"] = p
+    if trust_insecure():
+        out["verify"] = False
+    return out
 
 
 def cloakbrowser_launch_kwargs() -> dict[str, Any]:
@@ -85,4 +129,5 @@ __all__ = [
     "env_proxy",
     "httpx_client_kwargs",
     "resolve_proxy",
+    "trust_insecure",
 ]

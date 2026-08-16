@@ -85,3 +85,72 @@ def test_cloakbrowser_launch_kwargs_playwright_shape(monkeypatch) -> None:
 def test_cloakbrowser_launch_kwargs_no_proxy(monkeypatch) -> None:
     monkeypatch.delenv("SPIDER_PROXY_URL", raising=False)
     assert proxy.cloakbrowser_launch_kwargs() == {}
+
+
+# --- SPIDER_PROXY_TRUST_INSECURE -----------------------------------------
+
+
+def test_trust_insecure_unset(monkeypatch) -> None:
+    monkeypatch.delenv("SPIDER_PROXY_TRUST_INSECURE", raising=False)
+    assert proxy.trust_insecure() is False
+
+
+def test_trust_insecure_empty(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "")
+    assert proxy.trust_insecure() is False
+
+
+def test_trust_insecure_truthy_values(monkeypatch) -> None:
+    for v in ("1", "true", "TRUE", "Yes", "yes", "on", "ON"):
+        monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", v)
+        assert proxy.trust_insecure() is True, f"expected truthy: {v!r}"
+
+
+def test_trust_insecure_falsy_values(monkeypatch) -> None:
+    for v in ("0", "false", "no", "off", "anything-else", "  ", "FALSE"):
+        monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", v)
+        assert proxy.trust_insecure() is False, f"expected falsy: {v!r}"
+
+
+def test_trust_insecure_whitespace_trimmed(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "  yes  ")
+    assert proxy.trust_insecure() is True
+
+
+def test_httpx_client_kwargs_adds_verify_false_when_insecure(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_PROXY_URL", "http://env:8080")
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "1")
+    assert proxy.httpx_client_kwargs() == {"proxy": "http://env:8080", "verify": False}
+
+
+def test_httpx_client_kwargs_verify_only_when_insecure_no_proxy(monkeypatch) -> None:
+    """verify=False is added even without a proxy when the flag is set —
+    callers shouldn't be silently strict if the operator explicitly opted in."""
+    monkeypatch.delenv("SPIDER_PROXY_URL", raising=False)
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "1")
+    assert proxy.httpx_client_kwargs() == {"verify": False}
+
+
+def test_httpx_client_kwargs_no_verify_when_secure(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_PROXY_URL", "http://env:8080")
+    monkeypatch.delenv("SPIDER_PROXY_TRUST_INSECURE", raising=False)
+    assert proxy.httpx_client_kwargs() == {"proxy": "http://env:8080"}
+
+
+def test_aiohttp_request_kwargs_adds_ssl_false_when_insecure(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_PROXY_URL", "http://env:8080")
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "1")
+    assert proxy.aiohttp_request_kwargs() == {"proxy": "http://env:8080", "ssl": False}
+
+
+def test_aiohttp_request_kwargs_ssl_only_when_insecure_no_proxy(monkeypatch) -> None:
+    monkeypatch.delenv("SPIDER_PROXY_URL", raising=False)
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "1")
+    assert proxy.aiohttp_request_kwargs() == {"ssl": False}
+
+
+def test_insecure_works_with_per_call_proxy(monkeypatch) -> None:
+    """Per-call proxy + insecure flag = override applies, ssl still bypassed."""
+    monkeypatch.setenv("SPIDER_PROXY_TRUST_INSECURE", "1")
+    out = proxy.httpx_client_kwargs("http://per:1234")
+    assert out == {"proxy": "http://per:1234", "verify": False}
