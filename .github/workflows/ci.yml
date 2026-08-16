@@ -87,6 +87,7 @@ jobs:
             tests/test_spider_skill.py \
             tests/test_routes.py \
             tests/test_crawl.py \
+            tests/test_crawl_dispatcher.py \
             -q --tb=short -ra
 
       # Extended: optional backends, sinks, feeds, profiles, parsers.

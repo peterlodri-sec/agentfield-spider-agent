@@ -4,10 +4,13 @@ Public surface:
 - crawl_start(redis, seed_url, max_depth, max_pages, same_domain_only, timeout_seconds) -> job_id
 - crawl_status(redis, job_id) -> dict with status, counts, errors
 - crawl_iter(deps, redis, job_id) -> one iteration of the crawler loop (called by dispatcher)
+- crawl_dispatcher(deps, redis) -> background loop scanning active crawl jobs (spider_server)
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time
 import uuid
 from typing import Any
@@ -21,6 +24,8 @@ from .security import is_safe_external_url
 
 # Redis key patterns
 _JOB_PREFIX = "crawler:crawl"
+_STATE_SCAN_MATCH = f"{_JOB_PREFIX}:*:state"
+CRAWL_DISPATCH_TICK_S = float(os.environ.get("CRAWL_DISPATCH_TICK_S", "2"))
 
 
 def _QUEUE_KEY(job_id: str) -> str:
@@ -238,3 +243,59 @@ async def crawl_iter(
     )
 
     return await crawl_status(redis, job_id)
+
+
+async def _active_crawl_job_ids(redis: Any) -> list[str]:
+    """Return job ids with a state hash (``crawler:crawl:{id}:state``)."""
+    prefix = f"{_JOB_PREFIX}:"
+    suffix = ":state"
+    job_ids: list[str] = []
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=_STATE_SCAN_MATCH, count=100)
+        for key in keys:
+            name = key.decode("utf-8") if isinstance(key, bytes) else str(key)
+            if not name.startswith(prefix) or not name.endswith(suffix):
+                continue
+            job_id = name[len(prefix) : -len(suffix)]
+            if job_id:
+                job_ids.append(job_id)
+        if cursor == 0:
+            break
+    return job_ids
+
+
+async def crawl_dispatcher(deps: FetchDeps, redis: Any) -> None:
+    """Poll active crawl jobs and call ``crawl_iter`` for each.
+
+    Started from ``spider_server.py`` on app startup. Scans
+    ``crawler:crawl:*:state`` keys, runs one ``crawl_iter`` tick per
+    job still ``queued`` or ``running``, then sleeps ``CRAWL_DISPATCH_TICK_S``.
+    Cancel-safe.
+    """
+    log("crawl_dispatcher", state="ready", tick_s=CRAWL_DISPATCH_TICK_S)
+    try:
+        while True:
+            try:
+                for job_id in await _active_crawl_job_ids(redis):
+                    status = await crawl_status(redis, job_id)
+                    if status.get("status") not in ("queued", "running"):
+                        continue
+                    try:
+                        await crawl_iter(deps, redis, job_id)
+                    except Exception as e:  # pragma: no cover
+                        log(
+                            "crawl_dispatcher",
+                            state="error",
+                            job_id=job_id,
+                            msg=f"{type(e).__name__}: {e}",
+                        )
+                await asyncio.sleep(CRAWL_DISPATCH_TICK_S)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover
+                log("error", where="crawl_dispatcher", msg=f"{type(e).__name__}: {e}")
+                await asyncio.sleep(CRAWL_DISPATCH_TICK_S)
+    except asyncio.CancelledError:
+        log("crawl_dispatcher", state="stopped")
+        raise
