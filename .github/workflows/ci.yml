@@ -86,7 +86,13 @@ jobs:
             tests/test_fetchers_reddit.py \
             tests/test_spider_skill.py \
             tests/test_routes.py \
+            tests/test_act_route.py \
+            tests/test_evasion_warming.py \
+            tests/test_http_session.py \
+            tests/test_security_allowlist.py \
+            tests/test_session_profiles.py \
             tests/test_crawl.py \
+            tests/test_crawl_dispatcher.py \
             -q --tb=short -ra
 
       # Extended: optional backends, sinks, feeds, profiles, parsers.

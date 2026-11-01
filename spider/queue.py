@@ -119,7 +119,14 @@ async def dispatcher(deps: FetchDeps, redis: Any) -> None:
     log("dispatcher", state="ready", concurrency=CRAWL_CONCURRENCY)
     try:
         while True:
-            popped = await redis.brpop([K_QUEUE], timeout=0)
+            try:
+                popped = await redis.brpop([K_QUEUE], timeout=0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover
+                log("error", where="dispatcher", msg=f"{type(e).__name__}: {e}")
+                await asyncio.sleep(2.0)
+                continue
             if popped is None:
                 continue
             _key, raw = popped

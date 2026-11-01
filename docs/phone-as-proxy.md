@@ -183,6 +183,71 @@ SPIDER_PROXY_URL=http://<pi-lan-ip>:8888
 
 ---
 
+## Trusting the proxy's MITM CA
+
+Some phone-proxy setups do **HTTPS interception** — the proxy terminates
+the TLS connection, inspects/modifies the request (e.g. rotates the
+`User-Agent` to a mobile signature), and re-encrypts to the upstream
+with its own CA-signed cert. mitmproxy, Charles, and Fiddler all do
+this. The S8 mobile-gateway runbook in `peterlodri-sec/adhoc-runbooks`
+(`runbooks/samsung-s8-4g-gateway/`) is the canonical example.
+
+Without the proxy's CA in the spider's trust store, every HTTPS call
+through the proxy surfaces:
+
+```
+[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed:
+unable to get local issuer certificate
+```
+
+### The right fix: install the CA
+
+mitmproxy serves its CA at `http://mitm.it/cert/pem` when accessed
+**through the proxy itself**:
+
+```bash
+curl -sS -x $SPIDER_PROXY_URL http://mitm.it/cert/pem > mitm-ca.pem
+
+# Install in the spider container's system trust store:
+docker cp mitm-ca.pem <spider-http-container>:/usr/local/share/ca-certificates/mitm.crt
+docker exec <spider-http-container> update-ca-certificates
+
+# Also append to certifi's bundle — httpx uses certifi by default,
+# not the system trust store:
+CERTIFI=$(docker exec <spider-http-container> python3 -c "import certifi; print(certifi.where())")
+docker exec <spider-http-container> sh -c "cat /usr/local/share/ca-certificates/mitm.crt >> $CERTIFI"
+
+docker compose restart spider-http
+```
+
+For persistence across container recreates, bake the CA into the image
+(`COPY mitm-ca.pem /usr/local/share/ca-certificates/` + `RUN update-ca-certificates`)
+or mount it as a Docker volume.
+
+### The escape hatch: `SPIDER_PROXY_TRUST_INSECURE`
+
+For dev iteration, ephemeral containers, or environments where
+managing the CA is impractical, set:
+
+```
+SPIDER_PROXY_TRUST_INSECURE=1
+```
+
+This makes the spider skip TLS verification on outbound HTTPS:
+
+- httpx clients get `verify=False`
+- aiohttp requests get `ssl=False`
+- browser contexts get `ignore_https_errors=True`
+
+Truthy values: `1`, `true`, `yes`, `on` (case-insensitive).
+
+**Use with care.** The skipped verification applies to all outbound
+HTTPS, not just calls through the proxy. If you ever bypass the proxy
+(per-call `proxy=""`), those calls will also be unverified. Prefer
+the CA-install route for production; reserve the flag for dev.
+
+---
+
 ## Verification
 
 The spider logs `proxy=true` on `browser.opened` when it launches

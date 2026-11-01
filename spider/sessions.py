@@ -57,6 +57,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import proxy
 from .evasion import EvasionBase, EvasionConfig
 from .log import log
 
@@ -212,6 +213,11 @@ class SessionManager:
         # both backends accept the call signature. Persona-derived
         # kwargs go in first; explicit caller kwargs override.
         ctx_kwargs: dict[str, Any] = {}
+        # When the operator opted into trusting a MITM proxy's cert
+        # (e.g. mitmproxy + UA-spoof addon), tell Chromium not to fail
+        # the navigation on the self-signed/re-signed cert.
+        if proxy.trust_insecure():
+            ctx_kwargs["ignore_https_errors"] = True
         if evasion is not None:
             ctx_kwargs.update(evasion.context_kwargs())
         if user_agent:

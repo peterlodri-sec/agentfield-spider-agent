@@ -7,7 +7,7 @@
 
 [project]
 name = "agentfield-spider-agent"
-version = "0.4.0"
+version = "0.5.0"
 description = "Spider/crawler agent — CloakBrowser/Lightpanda + URL dispatcher + Docling + RSS/Atom + Redis queue"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,10 +24,13 @@ dependencies = [
     "feedparser>=6",
     "orjson",
     "beautifulsoup4>=4.12",
-    "cloakbrowser",
+    "cloakbrowser>=0.6.5",
 ]
 
 [project.optional-dependencies]
+geoip = [
+    "cloakbrowser[geoip]>=0.6.5",
+]
 docling = [
     "docling>=2.0",
 ]

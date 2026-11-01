@@ -169,6 +169,9 @@ class _SessionBrowser:
 class _SessionPool:
     _browser: _SessionBrowser = field(default_factory=_SessionBrowser)
 
+    async def ensure_browser(self) -> _SessionBrowser:
+        return self._browser
+
 
 @pytest.mark.asyncio
 async def test_fetch_calls_pre_goto_before_target_navigation(make_deps, monkeypatch) -> None:

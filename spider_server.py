@@ -12,11 +12,13 @@ Runs the full v1 surface:
   POST   /feeds/{id}/poll  force-poll
   GET    /jobs?limit=50    recent
 
-On startup we connect to Redis (via ``REDIS_URL``) and spawn two
+On startup we connect to Redis (via ``REDIS_URL``) and spawn three
 background tasks:
 
   - **dispatcher** drains ``crawler:queue`` and fan-outs to bounded
     workers.
+  - **crawl_dispatcher** scans ``crawler:crawl:*:state`` and runs
+    ``crawl_iter`` for active crawl jobs.
   - **poller** wakes when the next-due feed becomes due and re-polls it.
 
 Both are cancel-safe and unwind cleanly when ``_on_cleanup`` fires.
@@ -41,6 +43,7 @@ from aiohttp import web
 from spider import storage as pg_storage
 from spider.browser import BROWSER_MAX_PAGES, CloakBrowserPool
 from spider.browsers import env_backend, make_pool, register_primary, shutdown_all
+from spider.crawl import crawl_dispatcher
 from spider.feeds import poller
 from spider.fetch import FetchDeps
 from spider.politeness import HostBucket, RobotsCache
@@ -190,6 +193,7 @@ async def _on_startup(app: web.Application) -> None:
     # broken Redis surfaces as task failures the next time they wake
     # rather than during startup.
     app["dispatcher_task"] = asyncio.create_task(dispatcher(deps, r))
+    app["crawl_dispatcher_task"] = asyncio.create_task(crawl_dispatcher(deps, r))
     app["poller_task"] = asyncio.create_task(poller(http, r))
     logger.info("spider-http background tasks started")
 
@@ -236,7 +240,7 @@ async def _on_cleanup(app: web.Application) -> None:
     logger.info("spider-http cleanup begin")
 
     # 1. Cancel background tasks (cheap, ~instant)
-    for key in ("dispatcher_task", "poller_task"):
+    for key in ("dispatcher_task", "crawl_dispatcher_task", "poller_task"):
         t: asyncio.Task[None] | None = app.get(key)
         if t is None or t.done():
             continue

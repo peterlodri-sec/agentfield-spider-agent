@@ -6,7 +6,7 @@ redis>=5
 feedparser>=6
 orjson
 beautifulsoup4>=4.12
-cloakbrowser
+cloakbrowser>=0.6.5
 # Postgres-backed profiles + (future) session persistence. When the
 # POSTGRES_URL env isn't set, the agent runs without it — features
 # that need persistence return 503.

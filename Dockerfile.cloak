@@ -54,21 +54,9 @@ RUN pip install --no-cache-dir \
         cloakbrowser$( [ "${CLOAKBROWSER_VERSION}" = "latest" ] || echo "==${CLOAKBROWSER_VERSION}" )
 
 # Force the binary download in the build, not at first run.
-# cloakbrowser exposes a CLI for this; if not, importing + a no-op
-# launch attempt is enough.
-RUN python -c "from cloakbrowser import launch_async; print('cloakbrowser', 'imported ok')" && \
-    # Trigger any auto-download by spawning a dry launch (helper).
-    # Tolerate failure here — some versions only download on the
-    # FIRST actual page open; either way the next layer will catch
-    # anything missing.
-    python -c "import asyncio; from cloakbrowser import launch_async; \
-        async def w(): \
-            try: \
-                b = await launch_async(headless=True); \
-                await b.close(); \
-            except Exception as e: \
-                print('launch warmup:', type(e).__name__, e); \
-        asyncio.run(w())" || true
+# cloakbrowser v0.6.5+ exposes ensure_binary() to download and verify
+# the stealth Chromium binary (Chromium 155+ with 87 C++ patches).
+RUN python -c "from cloakbrowser import ensure_binary, launch_async; p = ensure_binary(); print('cloakbrowser binary ready:', p)"
 
 # ─── Stage 2: slim runtime ──────────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -99,6 +87,7 @@ COPY --from=prefetch /root/.cloakbrowser /root/.cloakbrowser
 # jemalloc — significant memory savings on Chromium workloads.
 ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 ENV MALLOC_CONF=background_thread:true,metadata_thp:auto
+ENV CLOAKBROWSER_SUPPRESS_FONT_WARNING=1
 
 # This image's CMD is a sanity probe — it's meant to be used as a
 # BASE for spider-agent or imported via FROM in CI tests. The actual
